@@ -1,0 +1,23 @@
+# build folder
+build/
+
+#bin folder
+bin/
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+
+#personal
+revision/
+
+# executables
+*.exe
+
+# system / IDE
+.vscode/
+.idea/
+
