@@ -27,7 +27,7 @@ const char *fragmentShaderSource =
     "{\n"
     "    vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));\n"
     "    float diff = max(dot(n, uLDir), 0.0);\n"
-    "    vec3 c = vec3(0.0, 0.6, 1.0);\n"
+    "    vec3 c = vec3(0.0, 1.0, 0.8);\n"
     "    FragColor = vec4(c * diff, 1.0);\n"
     "}\n";
 
@@ -44,8 +44,8 @@ typedef struct
 void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLfloat *vertices, GLuint *indices, unsigned int v_num, unsigned int i_num, GLenum usage);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
-void DrawSphere(GLfloat **vertices, GLuint **indices, float r, int stacks, int slices, unsigned int *v_num, unsigned int *i_num);
-
+void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
+void getWaterHeight(float deltaH, GLfloat *vertices, int stacks, int slices, float r);
 int main()
 {
     glfwInit();
@@ -53,13 +53,20 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    body core;
-    float r = 0.2f;
-    int stacks = 16;
-    int slices = 16;
+    body core = {0};
+    float r = 0.3f;
+    int stacks = 50;
+    int slices = 50;
 
-    DrawSphere(&core.vertices, &core.indices, r, stacks, slices, &core.v_num, &core.i_num);
+    core.v_num = (stacks + 1) * (slices + 1) * 3;
+    core.i_num = stacks * slices * 6;
 
+    core.vertices = malloc(sizeof(GLfloat) * core.v_num);
+    core.indices = malloc(sizeof(GLuint) * core.i_num);
+
+    DrawSphere(core.vertices, core.indices, r, stacks, slices);
+    printf("Sphere generated\n");
+    getWaterHeight(0.15f, core.vertices, stacks, slices, r);
     GLFWwindow *window = glfwCreateWindow(800, 800, "my app", NULL, NULL);
     if (window == NULL)
     {
@@ -86,13 +93,13 @@ int main()
              core.vertices, core.indices,
              core.v_num, core.i_num, GL_STATIC_DRAW);
 
-    glClearColor(0.54, 0.17, 0.89, 1.0f);
+    glClearColor(0.4f, 0.0f, 1.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glfwSwapBuffers(window);
 
     while (!glfwWindowShouldClose(window))
     {
-        glClearColor(0.54, 0.17, 0.89, 1.0f);
+        glClearColor(0.4f, 0.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glfwPollEvents();
         mat4 view, proj, view_proj;
@@ -127,32 +134,27 @@ int main()
     return 0;
 }
 
-void DrawSphere(GLfloat **vertices, GLuint **indices, float r, int stacks, int slices, unsigned int *v_num, unsigned int *i_num)
+void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices)
 {
-    *v_num = (stacks + 1) * (slices + 1) * 3;
-    *i_num = stacks * slices * 6;
-
-    *vertices = malloc(sizeof(GLfloat) * (*v_num));
-    *indices = malloc(sizeof(GLuint) * (*i_num));
 
     int vidx = 0;
     int iidx = 0;
 
     for (int i = 0; i <= slices; i++)
     {
-        float alpha = (float)i * M_PI / slices;
-        float sa = sinf(alpha);
-        float ca = cosf(alpha);
+        float phi = (float)i * M_PI / slices;
+        float sa = sinf(phi);
+        float ca = cosf(phi);
 
         for (int j = 0; j <= stacks; j++)
         {
-            float beta = (float)j * 2.0f * M_PI / stacks;
-            float sb = sinf(beta);
-            float cb = cosf(beta);
+            float theta = (float)j * 2.0f * M_PI / stacks;
+            float sb = sinf(theta);
+            float cb = cosf(theta);
 
-            (*vertices)[vidx++] = r * sa * cb;
-            (*vertices)[vidx++] = r * ca;
-            (*vertices)[vidx++] = r * sa * sb;
+            vertices[vidx++] = r * ca * cb;
+            vertices[vidx++] = r * sb;
+            vertices[vidx++] = r * -sa * cb;
         }
     }
 
@@ -165,13 +167,35 @@ void DrawSphere(GLfloat **vertices, GLuint **indices, float r, int stacks, int s
             int C = (i + 1) * (stacks + 1) + j;
             int D = (i + 1) * (stacks + 1) + j + 1;
 
-            (*indices)[iidx++] = A;
-            (*indices)[iidx++] = B;
-            (*indices)[iidx++] = C;
+            indices[iidx++] = A;
+            indices[iidx++] = B;
+            indices[iidx++] = C;
 
-            (*indices)[iidx++] = B;
-            (*indices)[iidx++] = D;
-            (*indices)[iidx++] = C;
+            indices[iidx++] = B;
+            indices[iidx++] = D;
+            indices[iidx++] = C;
+        }
+    }
+}
+
+void getWaterHeight(float deltaH, GLfloat *vertices, int stacks, int slices, float r)
+{
+    int vidx = 0;
+    vec3 F = {0.0f, 1.0f, 0.0f};
+    glm_normalize(F);
+    for (int i = 0; i <= slices; i++)
+    {
+        float phi = (float)i * M_PI / slices;
+        for (int j = 0; j <= stacks; j++)
+        {
+            float theta = (float)j * 2.0f * M_PI / stacks;
+            vec3 normal = {cosf(phi) * cosf(theta), sinf(theta), -sinf(phi) * cosf(theta)};
+            glm_normalize(normal);
+            float cos_gamma = glm_dot(F, normal);
+            float level_change = deltaH * (3 * cos_gamma * cos_gamma - 1) / 2;
+            vertices[vidx++] += normal[0] * (r + level_change);
+            vertices[vidx++] += normal[1] * (r + level_change);
+            vertices[vidx++] += normal[2] * (r + level_change);
         }
     }
 }
@@ -182,7 +206,7 @@ GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentS
     glShaderSource(vertex_shader, 1, &vertexShaderSource, NULL);
     glCompileShader(vertex_shader);
 
-    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER); // fragment
+    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragment_shader, 1, &fragmentShaderSource, NULL);
     glCompileShader(fragment_shader);
 
