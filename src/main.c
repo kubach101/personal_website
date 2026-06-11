@@ -9,43 +9,48 @@
 const char *vertexShaderSource =
     "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
+    "layout (location = 1) in vec3 aNorm;\n"
     "uniform mat4 uMVP;\n"
-    "uniform mat4 uModel;\n"
-    "out vec3 vPos;\n"
+    "uniform mat3 uNormMat;\n"
+    "out vec3 normal;\n"
     "void main()\n"
     "{\n"
     "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
-    "    vPos = vec3(uModel * vec4(aPos, 1.0));\n"
+    "    normal = normalize(uNormMat * aNorm);\n"
     "}\n";
 
 const char *fragmentShaderSource =
     "#version 330 core\n"
     "out vec4 FragColor;\n"
-    "in vec3 vPos;\n"
+    "in vec3 normal;\n"
     "uniform vec3 uLDir;\n"
     "void main()\n"
     "{\n"
-    "    vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));\n"
-    "    float diff = max(dot(n, uLDir), 0.0);\n"
-    "    vec3 c = vec3(0.0, 1.0, 0.8);\n"
-    "    FragColor = vec4(c * diff, 1.0);\n"
+    "    float diff = max(dot(normal, uLDir), 0.0);\n"
+    "    vec3 c = vec3(0.0, 1.0, 0.6);\n"
+    "    c *= diff;\n"
+    "    c += vec3(0.0, 0.2, 0.15);\n"
+    "    FragColor = vec4(c, 1.0);\n"
     "}\n";
 
 typedef struct
 {
     float mass;
     vec3 pos, v, a;
-    GLuint VAO, VBO, EBO;
+    GLuint VAO, VBO, EBO, NAO;
     GLfloat *vertices;
     GLuint *indices;
-    unsigned int v_num, i_num;
+    GLfloat *normals;
+    unsigned int v_num, i_num, n_num;
     GLuint shader_prog;
 } body;
-void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLfloat *vertices, GLuint *indices, unsigned int v_num, unsigned int i_num, GLenum usage);
+void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLuint NAO, GLfloat *vertices, GLuint *indices, GLfloat *normals, unsigned int v_num, unsigned int i_num, GLenum usage);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
-void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
+void DrawSphere(GLfloat *vertices, GLuint *indices, GLfloat *normals, float r, int stacks, int slices);
 void getWaterHeight(float deltaH, GLfloat *vertices, int stacks, int slices, float r);
+void updateNormals(GLfloat *vertices, GLfloat *normals, unsigned int num);
+
 int main()
 {
     glfwInit();
@@ -60,13 +65,15 @@ int main()
 
     core.v_num = (stacks + 1) * (slices + 1) * 3;
     core.i_num = stacks * slices * 6;
+    core.n_num = core.v_num;
 
     core.vertices = malloc(sizeof(GLfloat) * core.v_num);
     core.indices = malloc(sizeof(GLuint) * core.i_num);
+    core.normals = malloc(sizeof(GLfloat) * core.n_num);
 
-    DrawSphere(core.vertices, core.indices, r, stacks, slices);
+    DrawSphere(core.vertices, core.indices, core.normals, r, stacks, slices);
     printf("Sphere generated\n");
-    getWaterHeight(0.15f, core.vertices, stacks, slices, r);
+    getWaterHeight(0.1f, core.vertices, stacks, slices, r);
     GLFWwindow *window = glfwCreateWindow(800, 800, "my app", NULL, NULL);
     if (window == NULL)
     {
@@ -88,18 +95,19 @@ int main()
     glGenVertexArrays(1, &core.VAO);
     glGenBuffers(1, &core.VBO);
     glGenBuffers(1, &core.EBO);
+    glGenBuffers(1, &core.NAO);
 
-    sendData(core.VAO, core.VBO, core.EBO,
-             core.vertices, core.indices,
+    sendData(core.VAO, core.VBO, core.EBO, core.NAO,
+             core.vertices, core.indices, core.normals,
              core.v_num, core.i_num, GL_STATIC_DRAW);
 
-    glClearColor(0.4f, 0.0f, 1.0f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glfwSwapBuffers(window);
 
     while (!glfwWindowShouldClose(window))
     {
-        glClearColor(0.4f, 0.0f, 1.0f, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glfwPollEvents();
         mat4 view, proj, view_proj;
@@ -113,14 +121,22 @@ int main()
         float angle = (float)glfwGetTime();
         mat4 model;
         glm_mat4_identity(model);
-        glm_rotate(model, angle, (vec3){1.0f, 1.0f, 1.0f});
-
+        glm_rotate(model, angle, (vec3){0.577f, 0.577f, 0.577f});
         mat4 mvp;
         glm_mat4_mul(view_proj, model, mvp);
+        mat4 tmp;
+        mat3 nmodel;
+        glm_mat4_inv(model, tmp);
+        glm_mat4_transpose(tmp);
+        glm_mat4_pick3(tmp, nmodel);
+
+        vec3 ldir = {1.0f, 0.0f, 1.0f};
+        glm_normalize(ldir);
         glUseProgram(core.shader_prog);
         glUniformMatrix4fv(glGetUniformLocation(core.shader_prog, "uMVP"), 1, GL_FALSE, (float *)mvp);
         glUniformMatrix4fv(glGetUniformLocation(core.shader_prog, "uModel"), 1, GL_FALSE, (float *)model);
-        glUniform3f(glGetUniformLocation(core.shader_prog, "uLDir"), 0.577f, 0.577f, 0.577f);
+        glUniformMatrix3fv(glGetUniformLocation(core.shader_prog, "uNormMat"), 1, GL_FALSE, (float *)nmodel);
+        glUniform3f(glGetUniformLocation(core.shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
         glBindVertexArray(core.VAO);
         glDrawElements(GL_TRIANGLES, core.i_num, GL_UNSIGNED_INT, 0);
         glfwSwapBuffers(window);
@@ -134,10 +150,10 @@ int main()
     return 0;
 }
 
-void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices)
+void DrawSphere(GLfloat *vertices, GLuint *indices, GLfloat *normals, float r, int stacks, int slices)
 {
 
-    int vidx = 0;
+    int idx = 0;
     int iidx = 0;
 
     for (int i = 0; i <= slices; i++)
@@ -152,9 +168,15 @@ void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int sli
             float sb = sinf(theta);
             float cb = cosf(theta);
 
-            vertices[vidx++] = r * ca * cb;
-            vertices[vidx++] = r * sb;
-            vertices[vidx++] = r * -sa * cb;
+            normals[idx] = ca * cb;
+            vertices[idx] = r * normals[idx];
+            idx++;
+            normals[idx] = sb;
+            vertices[idx] = r * normals[idx];
+            idx++;
+            normals[idx] = -sa * cb;
+            vertices[idx] = r * normals[idx];
+            idx++;
         }
     }
 
@@ -200,6 +222,23 @@ void getWaterHeight(float deltaH, GLfloat *vertices, int stacks, int slices, flo
     }
 }
 
+void updateNormals(GLfloat *vertices, GLfloat *normals, unsigned int num)
+{
+    for (int i = 0; i < num; i += 3)
+    {
+        vec3 v;
+        for (int j = 0; j < 3; j++)
+        {
+            v[j] = vertices[i + j];
+        }
+        glm_normalize(v);
+        for (int j = 0; j < 3; j++)
+        {
+            normals[i + j] = v[j];
+        }
+    }
+}
+
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
 {
     GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
@@ -220,18 +259,22 @@ GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentS
     return shader_program;
 }
 
-void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLfloat *vertices, GLuint *indices, unsigned int v_num, unsigned int i_num, GLenum usage)
+void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLuint NAO, GLfloat *vertices, GLuint *indices, GLfloat *normals, unsigned int v_num, unsigned int i_num, GLenum usage)
 {
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * v_num, vertices, usage);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void *)0);
+    glEnableVertexAttribArray(0);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * i_num, indices, usage);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void *)0);
-    glEnableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, NAO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * v_num, normals, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void *)0);
+    glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
 }
