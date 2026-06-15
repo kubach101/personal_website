@@ -17,14 +17,13 @@
 const char *vertexShaderSource =
     "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
-    "layout (location = 1) in vec3 aNorm;\n"
     "uniform mat4 uMVP;\n"
     "uniform mat3 uNormMat;\n"
     "out vec3 normal;\n"
     "void main()\n"
     "{\n"
     "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
-    "    normal = normalize(uNormMat * aNorm);\n"
+    "    normal = normalize(uNormMat * aPos);\n"
     "}\n";
 
 const char *fragmentShaderSource =
@@ -57,53 +56,44 @@ const char *fragmentShaderSource2 =
 
 typedef struct
 {
-    float mass;
-    vec3 pos, v, a;
-    GLuint VAO, VBO, EBO, NAO;
+    GLuint VAO, VBO, EBO;
     GLfloat *vertices;
     GLuint *indices;
-    GLfloat *normals;
-    unsigned int v_num, i_num, n_num;
+    unsigned int v_num, i_num;
     GLuint shader_prog;
-} body;
-void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLuint NAO, GLfloat *vertices, GLuint *indices, GLfloat *normals, unsigned int v_num, unsigned int i_num, GLenum usage);
+} Obj;
+
+void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLfloat *vertices, GLuint *indices, unsigned int v_num, unsigned int i_num, GLenum usage);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
-void DrawSphere(GLfloat *vertices, GLuint *indices, GLfloat *normals, float r, int stacks, int slices);
+void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
 void getWaterHeight(float deltaH, vec3 FDir, GLfloat *vertices, int stacks, int slices, float r);
-void updateNormals(GLfloat *vertices, GLfloat *normals, unsigned int num);
 
 int main()
 {
     // planet core:
-    body core = {0};
+    Obj core = {0};
     float r = 0.3f;
     int stacks = 24;
     int slices = 24;
     core.v_num = (stacks + 1) * (slices + 1) * 3;
     core.i_num = stacks * slices * 6;
-    core.n_num = core.v_num;
     core.vertices = malloc(sizeof(GLfloat) * core.v_num);
     core.indices = malloc(sizeof(GLuint) * core.i_num);
-    core.normals = malloc(sizeof(GLfloat) * core.n_num);
-    DrawSphere(core.vertices, core.indices, core.normals, r, stacks, slices);
+    DrawSphere(core.vertices, core.indices, r, stacks, slices);
 
     // ocean:
-    body ocean = {0};
+    Obj ocean = {0};
     r = 0.5f;
     stacks = 32;
     slices = 32;
-    vec3 F = {1.0f, 0.0f, 0.0f};
-    glm_normalize(F);
+    vec3 FDir = {1.0f, 0.0f, 0.0f};
+    glm_normalize(FDir);
     ocean.v_num = (stacks + 1) * (slices + 1) * 3;
     ocean.i_num = stacks * slices * 6;
-    ocean.n_num = ocean.v_num;
     ocean.vertices = malloc(sizeof(GLfloat) * ocean.v_num);
     ocean.indices = malloc(sizeof(GLuint) * ocean.i_num);
-    ocean.normals = malloc(sizeof(GLfloat) * ocean.n_num);
-    DrawSphere(ocean.vertices, ocean.indices, ocean.normals, r, stacks, slices);
-    // getWaterHeight(0.15f, F, ocean.vertices, stacks, slices, r);
-    // updateNormals(ocean.vertices, ocean.normals, ocean.n_num);
+    DrawSphere(ocean.vertices, ocean.indices, r, stacks, slices);
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -134,19 +124,17 @@ int main()
     glGenVertexArrays(1, &core.VAO);
     glGenBuffers(1, &core.VBO);
     glGenBuffers(1, &core.EBO);
-    glGenBuffers(1, &core.NAO);
 
-    sendData(core.VAO, core.VBO, core.EBO, core.NAO,
-             core.vertices, core.indices, core.normals,
+    sendData(core.VAO, core.VBO, core.EBO,
+             core.vertices, core.indices,
              core.v_num, core.i_num, GL_STATIC_DRAW);
 
     glGenVertexArrays(1, &ocean.VAO);
     glGenBuffers(1, &ocean.VBO);
     glGenBuffers(1, &ocean.EBO);
-    glGenBuffers(1, &ocean.NAO);
 
-    sendData(ocean.VAO, ocean.VBO, ocean.EBO, ocean.NAO,
-             ocean.vertices, ocean.indices, ocean.normals,
+    sendData(ocean.VAO, ocean.VBO, ocean.EBO,
+             ocean.vertices, ocean.indices,
              ocean.v_num, ocean.i_num, GL_STATIC_DRAW);
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -163,11 +151,10 @@ int main()
         // Reshape water
         if (reshape)
         {
-            DrawSphere(ocean.vertices, ocean.indices, ocean.normals, r, stacks, slices);
-            getWaterHeight(deltaH, F, ocean.vertices, stacks, slices, r);
-            updateNormals(ocean.vertices, ocean.normals, ocean.n_num);
-            sendData(ocean.VAO, ocean.VBO, ocean.EBO, ocean.NAO,
-                     ocean.vertices, ocean.indices, ocean.normals,
+            DrawSphere(ocean.vertices, ocean.indices, r, stacks, slices);
+            getWaterHeight(deltaH, FDir, ocean.vertices, stacks, slices, r);
+            sendData(ocean.VAO, ocean.VBO, ocean.EBO,
+                     ocean.vertices, ocean.indices,
                      ocean.v_num, ocean.i_num, GL_DYNAMIC_DRAW);
             deltaH += 0.000002f;
             printf("\rdeltaH = %f pos:[%f|%f|%f]", deltaH, ocean.vertices[0], ocean.vertices[1], ocean.vertices[2]);
@@ -228,16 +215,14 @@ int main()
     glfwTerminate();
     free(core.vertices);
     free(core.indices);
-    free(core.normals);
 
     free(ocean.vertices);
     free(ocean.indices);
-    free(ocean.normals);
 
     return 0;
 }
 
-void DrawSphere(GLfloat *vertices, GLuint *indices, GLfloat *normals, float r, int stacks, int slices)
+void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices)
 {
 
     int idx = 0;
@@ -253,14 +238,11 @@ void DrawSphere(GLfloat *vertices, GLuint *indices, GLfloat *normals, float r, i
             float theta = (float)j * 2 * M_PI / slices;
             float st = sin(theta);
             float ct = cos(theta);
-            normals[idx] = sp * ct;
-            vertices[idx] = r * normals[idx];
+            vertices[idx] = r * sp * ct;
             idx++;
-            normals[idx] = cp;
-            vertices[idx] = r * normals[idx];
+            vertices[idx] = r * cp;
             idx++;
-            normals[idx] = sp * st;
-            vertices[idx] = r * normals[idx];
+            vertices[idx] = r * sp * st;
             idx++;
         }
     }
@@ -305,23 +287,6 @@ void getWaterHeight(float deltaH, vec3 FDir, GLfloat *vertices, int stacks, int 
     }
 }
 
-void updateNormals(GLfloat *vertices, GLfloat *normals, unsigned int num)
-{
-    for (int i = 0; i < num; i += 3)
-    {
-        vec3 v;
-        for (int j = 0; j < 3; j++)
-        {
-            v[j] = vertices[i + j];
-        }
-        glm_normalize(v);
-        for (int j = 0; j < 3; j++)
-        {
-            normals[i + j] = v[j];
-        }
-    }
-}
-
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
 {
     GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
@@ -342,7 +307,7 @@ GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentS
     return shader_program;
 }
 
-void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLuint NAO, GLfloat *vertices, GLuint *indices, GLfloat *normals, unsigned int v_num, unsigned int i_num, GLenum usage)
+void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLfloat *vertices, GLuint *indices, unsigned int v_num, unsigned int i_num, GLenum usage)
 {
     glBindVertexArray(VAO);
 
@@ -353,11 +318,6 @@ void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLuint NAO, GLfloat *vertices,
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * i_num, indices, usage);
-
-    glBindBuffer(GL_ARRAY_BUFFER, NAO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * v_num, normals, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void *)0);
-    glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
 }
