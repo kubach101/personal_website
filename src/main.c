@@ -48,10 +48,10 @@ const char *fragmentShaderSource2 =
     "void main()\n"
     "{\n"
     "    float diff = max(dot(normal, -uLDir), 0.0);\n"
-    "    vec3 col = vec3(0.0, 0.0, 0.8);\n"
+    "    vec3 col = vec3(0.0, 0.0, 0.6);\n"
     "    col *= diff;\n"
-    "    col += vec3(0.0, 0.0, 0.2);\n"
-    "    FragColor = vec4(col, 0.4);\n"
+    "    col += vec3(0.0, 0.0, 0.4);\n"
+    "    FragColor = vec4(col, 0.5);\n"
     "}\n";
 
 typedef struct
@@ -60,40 +60,62 @@ typedef struct
     GLfloat *vertices;
     GLuint *indices;
     unsigned int v_num, i_num;
+    int stacks, slices;
     GLuint shader_prog;
+    float mass, r;
+    vec3 pos;
 } Obj;
 
-void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLfloat *vertices, GLuint *indices, unsigned int v_num, unsigned int i_num, GLenum usage);
+void sendData(Obj object, GLenum usage);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
 void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
-void getWaterHeight(float deltaH, vec3 FDir, GLfloat *vertices, int stacks, int slices, float r);
-
+void getWaterHeight(Obj *planet, Obj *satelite, Obj *water);
 int main()
 {
     // planet core:
     Obj core = {0};
-    float r = 0.3f;
-    int stacks = 24;
-    int slices = 24;
-    core.v_num = (stacks + 1) * (slices + 1) * 3;
-    core.i_num = stacks * slices * 6;
+    core.r = 0.3f;
+    core.stacks = 36;
+    core.slices = 36;
+    core.v_num = (core.stacks + 1) * (core.slices + 1) * 3;
+    core.i_num = core.stacks * core.slices * 6;
     core.vertices = malloc(sizeof(GLfloat) * core.v_num);
     core.indices = malloc(sizeof(GLuint) * core.i_num);
-    DrawSphere(core.vertices, core.indices, r, stacks, slices);
+    DrawSphere(core.vertices, core.indices, core.r, core.stacks, core.slices);
+    core.mass = 14.5f;
+    core.pos[0] = 0.0f;
+    core.pos[1] = 0.0f;
+    core.pos[2] = 0.0f;
 
     // ocean:
     Obj ocean = {0};
-    r = 0.5f;
-    stacks = 32;
-    slices = 32;
-    vec3 FDir = {1.0f, 0.0f, 0.0f};
-    glm_normalize(FDir);
-    ocean.v_num = (stacks + 1) * (slices + 1) * 3;
-    ocean.i_num = stacks * slices * 6;
+    ocean.r = 0.35f;
+    ocean.stacks = 42;
+    ocean.slices = 42;
+    ocean.v_num = (ocean.stacks + 1) * (ocean.slices + 1) * 3;
+    ocean.i_num = ocean.stacks * ocean.slices * 6;
     ocean.vertices = malloc(sizeof(GLfloat) * ocean.v_num);
     ocean.indices = malloc(sizeof(GLuint) * ocean.i_num);
-    DrawSphere(ocean.vertices, ocean.indices, r, stacks, slices);
+    DrawSphere(ocean.vertices, ocean.indices, ocean.r, ocean.stacks, ocean.slices);
+    ocean.pos[0] = 0.0f;
+    ocean.pos[1] = 0.0f;
+    ocean.pos[2] = 0.0f;
+    ocean.mass = 0.5f;
+
+    Obj moon = {0};
+    moon.r = 0.08f;
+    moon.stacks = 12;
+    moon.slices = 12;
+    moon.v_num = (moon.stacks + 1) * (moon.slices + 1) * 3;
+    moon.i_num = moon.stacks * moon.slices * 6;
+    moon.vertices = malloc(sizeof(GLfloat) * moon.v_num);
+    moon.indices = malloc(sizeof(GLuint) * moon.i_num);
+    DrawSphere(moon.vertices, moon.indices, moon.r, moon.stacks, moon.slices);
+    moon.pos[0] = 3.0f;
+    moon.pos[1] = 0.0f;
+    moon.pos[2] = 0.0f;
+    moon.mass = 50000.0f;
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -120,22 +142,25 @@ int main()
 
     core.shader_prog = createShaderProgram(vertexShaderSource, fragmentShaderSource);
     ocean.shader_prog = createShaderProgram(vertexShaderSource, fragmentShaderSource2);
+    moon.shader_prog = createShaderProgram(vertexShaderSource, fragmentShaderSource);
 
     glGenVertexArrays(1, &core.VAO);
     glGenBuffers(1, &core.VBO);
     glGenBuffers(1, &core.EBO);
 
-    sendData(core.VAO, core.VBO, core.EBO,
-             core.vertices, core.indices,
-             core.v_num, core.i_num, GL_STATIC_DRAW);
+    sendData(core, GL_STATIC_DRAW);
 
     glGenVertexArrays(1, &ocean.VAO);
     glGenBuffers(1, &ocean.VBO);
     glGenBuffers(1, &ocean.EBO);
 
-    sendData(ocean.VAO, ocean.VBO, ocean.EBO,
-             ocean.vertices, ocean.indices,
-             ocean.v_num, ocean.i_num, GL_STATIC_DRAW);
+    sendData(ocean, GL_DYNAMIC_DRAW);
+
+    glGenVertexArrays(1, &moon.VAO);
+    glGenBuffers(1, &moon.VBO);
+    glGenBuffers(1, &moon.EBO);
+
+    sendData(moon, GL_STATIC_DRAW);
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -151,13 +176,8 @@ int main()
         // Reshape water
         if (reshape)
         {
-            DrawSphere(ocean.vertices, ocean.indices, r, stacks, slices);
-            getWaterHeight(deltaH, FDir, ocean.vertices, stacks, slices, r);
-            sendData(ocean.VAO, ocean.VBO, ocean.EBO,
-                     ocean.vertices, ocean.indices,
-                     ocean.v_num, ocean.i_num, GL_DYNAMIC_DRAW);
-            deltaH += 0.000002f;
-            printf("\rdeltaH = %f pos:[%f|%f|%f]", deltaH, ocean.vertices[0], ocean.vertices[1], ocean.vertices[2]);
+            getWaterHeight(&core, &moon, &ocean);
+            sendData(ocean, GL_DYNAMIC_DRAW);
         }
 
         mat4 model, mvp, view, proj, view_proj, tmp;
@@ -208,6 +228,7 @@ int main()
         glDisable(GL_BLEND);
 
         glfwSwapBuffers(window);
+        // debug:
         glfwPollEvents();
     }
 
@@ -218,6 +239,9 @@ int main()
 
     free(ocean.vertices);
     free(ocean.indices);
+
+    free(moon.vertices);
+    free(moon.indices);
 
     return 0;
 }
@@ -267,22 +291,35 @@ void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int sli
     }
 }
 
-void getWaterHeight(float deltaH, vec3 FDir, GLfloat *vertices, int stacks, int slices, float r)
+void getWaterHeight(Obj *planet, Obj *satelite, Obj *water)
 {
+    float d = sqrt((planet->pos[0] - satelite->pos[0]) * (planet->pos[0] - satelite->pos[0]) + (planet->pos[1] - satelite->pos[1]) * (planet->pos[1] - satelite->pos[1]) + (planet->pos[2] - satelite->pos[2]) * (planet->pos[2] - satelite->pos[2]));
+    float h0 = water->r - planet->r;
+
     int vidx = 0;
-    for (int i = 0; i <= slices; i++)
+    vec3 Fdir;
+    vec3 diff = {
+        satelite->pos[0] - planet->pos[0],
+        satelite->pos[1] - planet->pos[1],
+        satelite->pos[2] - planet->pos[2]};
+    glm_normalize_to(diff, Fdir);
+
+    for (int i = 0; i <= water->stacks; i++)
     {
-        float phi = (float)i * M_PI / slices;
-        for (int j = 0; j <= stacks; j++)
+        float phi = (float)i * M_PI / water->stacks;
+        for (int j = 0; j <= water->slices; j++)
         {
-            float theta = (float)j * 2.0f * M_PI / stacks;
-            vec3 normal = {sin(phi) * cos(theta), cos(phi), sin(phi) * sin(theta)};
+            float theta = (float)j * 2.0f * M_PI / water->slices;
+            vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
+            // printf("normal = %f %f %f\n", normal[0], normal[1], normal[2]);
             glm_normalize(normal);
-            float cos_gamma = glm_dot(FDir, normal);
-            float level_change = deltaH * (3 * cos_gamma * cos_gamma - 1) / 2;
-            vertices[vidx++] = normal[0] * (r + level_change);
-            vertices[vidx++] = normal[1] * (r + level_change);
-            vertices[vidx++] = normal[2] * (r + level_change);
+            float cos_gamma = glm_dot(Fdir, normal);
+            float h = h0 * 0.75f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (cos_gamma * cos_gamma - 1);
+            water->vertices[vidx++] = normal[0] * (water->r + h);
+            water->vertices[vidx++] = normal[1] * (water->r + h);
+            water->vertices[vidx++] = normal[2] * (water->r + h);
+            // printf("new height = %f| cos_gamma = %f\n", h, cos_gamma);
+            // printf("H0 = %f", h0);
         }
     }
 }
@@ -307,17 +344,17 @@ GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentS
     return shader_program;
 }
 
-void sendData(GLuint VAO, GLuint VBO, GLuint EBO, GLfloat *vertices, GLuint *indices, unsigned int v_num, unsigned int i_num, GLenum usage)
+void sendData(Obj object, GLenum usage)
 {
-    glBindVertexArray(VAO);
+    glBindVertexArray(object.VAO);
 
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * v_num, vertices, usage);
+    glBindBuffer(GL_ARRAY_BUFFER, object.VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * object.v_num, object.vertices, usage);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void *)0);
     glEnableVertexAttribArray(0);
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * i_num, indices, usage);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, object.EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * object.i_num, object.indices, usage);
 
     glBindVertexArray(0);
 }
