@@ -8,13 +8,14 @@
 #include <stdbool.h>
 
 #define Tscale 100
-#define Mscale 1.0E20
-#define Rscale 1.0E6
+#define Mscale 1.0E22
+#define Rscale 1.0E8
 #define Ascale Rscale / Tscale / Tscale
 #define Fscale Mscale *Ascale
 #define G 6.67E-11 * Rscale * Rscale * Rscale / (Mscale * Tscale * Tscale)
+#define TideScale 100
 
-const char *vertexShaderSource =
+const char *vert =
     "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
     "uniform mat4 uMVP;\n"
@@ -26,6 +27,7 @@ const char *vertexShaderSource =
     "    normal = normalize(uNormMat * aPos);\n"
     "}\n";
 
+/*
 const char *fragmentShaderSource =
     "#version 330 core\n"
     "out vec4 FragColor;\n"
@@ -39,19 +41,24 @@ const char *fragmentShaderSource =
     "    col += vec3(0.2, 0.0, 0.0);\n"
     "    FragColor = vec4(col, 1.0);\n"
     "}\n";
+*/
 
-const char *fragmentShaderSource2 =
+const char *frag =
     "#version 330 core\n"
-    "out vec4 FragColor;\n"
+    "out vec4 fragCol;\n"
     "in vec3 normal;\n"
+    "uniform vec4 uCol;\n"
     "uniform vec3 uLDir;\n"
     "void main()\n"
     "{\n"
     "    float diff = max(dot(normal, -uLDir), 0.0);\n"
-    "    vec3 col = vec3(0.0, 0.0, 0.6);\n"
-    "    col *= diff;\n"
-    "    col += vec3(0.0, 0.0, 0.4);\n"
-    "    FragColor = vec4(col, 0.5);\n"
+    "    fragCol = uCol;\n"
+    "   for(int i =0; i < 3; i++){\n"
+    "       float minCol = fragCol[i]*0.3f;\n"
+    "       fragCol[i] = fragCol[i]*0.7;\n"
+    "        fragCol[i] *= diff;\n"
+    "       fragCol[i] += minCol;\n"
+    "     }\n"
     "}\n";
 
 typedef struct
@@ -64,17 +71,29 @@ typedef struct
     GLuint shader_prog;
     float mass, r;
     vec3 pos;
+    mat4 mvp, model;
+    mat3 nmodel;
+    vec4 col;
+    int mode;
 } Obj;
+
+enum RenderType
+{
+    SOLID = 0,
+    FLUID = 1
+};
 
 void sendData(Obj object, GLenum usage);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
 void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
-void getWaterHeight(Obj *planet, Obj *satelite, Obj *water);
+void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water);
+void Modify(mat4 ProjView, Obj *O);
+void Render(Obj *O, vec3 ldir);
 int main()
 {
     // planet core:
-    Obj core = {0};
+    Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.06378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
     core.r = 0.3f;
     core.stacks = 36;
     core.slices = 36;
@@ -83,14 +102,10 @@ int main()
     core.vertices = malloc(sizeof(GLfloat) * core.v_num);
     core.indices = malloc(sizeof(GLuint) * core.i_num);
     DrawSphere(core.vertices, core.indices, core.r, core.stacks, core.slices);
-    core.mass = 14.5f;
-    core.pos[0] = 0.0f;
-    core.pos[1] = 0.0f;
-    core.pos[2] = 0.0f;
 
     // ocean:
-    Obj ocean = {0};
-    ocean.r = 0.35f;
+    Obj ocean = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.067f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.4f}, FLUID};
+    ocean.r = 0.38f;
     ocean.stacks = 42;
     ocean.slices = 42;
     ocean.v_num = (ocean.stacks + 1) * (ocean.slices + 1) * 3;
@@ -98,24 +113,16 @@ int main()
     ocean.vertices = malloc(sizeof(GLfloat) * ocean.v_num);
     ocean.indices = malloc(sizeof(GLuint) * ocean.i_num);
     DrawSphere(ocean.vertices, ocean.indices, ocean.r, ocean.stacks, ocean.slices);
-    ocean.pos[0] = 0.0f;
-    ocean.pos[1] = 0.0f;
-    ocean.pos[2] = 0.0f;
-    ocean.mass = 0.5f;
 
-    Obj moon = {0};
-    moon.r = 0.08f;
-    moon.stacks = 12;
-    moon.slices = 12;
+    Obj moon = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7.35f, 0.017374f, {3.85f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.6f, 0.6f, 0.6f, 1.0f}, SOLID};
+    moon.r = 0.1f;
+    moon.stacks = 24;
+    moon.slices = 24;
     moon.v_num = (moon.stacks + 1) * (moon.slices + 1) * 3;
     moon.i_num = moon.stacks * moon.slices * 6;
     moon.vertices = malloc(sizeof(GLfloat) * moon.v_num);
     moon.indices = malloc(sizeof(GLuint) * moon.i_num);
     DrawSphere(moon.vertices, moon.indices, moon.r, moon.stacks, moon.slices);
-    moon.pos[0] = 3.0f;
-    moon.pos[1] = 0.0f;
-    moon.pos[2] = 0.0f;
-    moon.mass = 50000.0f;
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -140,9 +147,9 @@ int main()
     // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    core.shader_prog = createShaderProgram(vertexShaderSource, fragmentShaderSource);
-    ocean.shader_prog = createShaderProgram(vertexShaderSource, fragmentShaderSource2);
-    moon.shader_prog = createShaderProgram(vertexShaderSource, fragmentShaderSource);
+    core.shader_prog = createShaderProgram(vert, frag);
+    ocean.shader_prog = createShaderProgram(vert, frag);
+    moon.shader_prog = createShaderProgram(vert, frag);
 
     glGenVertexArrays(1, &core.VAO);
     glGenBuffers(1, &core.VBO);
@@ -167,7 +174,20 @@ int main()
     glfwSwapBuffers(window);
 
     bool reshape = true;
-    float deltaH = 0.0f;
+
+    // visual details:
+    mat4 view, proj, view_proj;
+    glm_perspective(glm_rad(45.0f), 800 / 800, 0.1f, 100.0f, proj);
+    glm_lookat(
+        (vec3){0.0f, 0.0f, 30.0f},
+        (vec3){0.0f, 0.0f, 0.0f},
+        (vec3){0.0f, 1.0f, 0.0f},
+        view);
+    glm_mat4_mul(proj, view, view_proj);
+
+    vec3 ldir = {1.0f, 0.0f, -1.0f};
+    glm_normalize(ldir);
+
     while (!glfwWindowShouldClose(window))
     {
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -176,56 +196,19 @@ int main()
         // Reshape water
         if (reshape)
         {
-            getWaterHeight(&core, &moon, &ocean);
+            ShapeWaterLayer(&core, &moon, &ocean);
             sendData(ocean, GL_DYNAMIC_DRAW);
+            moon.pos[0] -= 0.00001f;
         }
 
-        mat4 model, mvp, view, proj, view_proj, tmp;
-        glm_lookat(
-            (vec3){0.0f, 0.0f, 2.5f},
-            (vec3){0.0f, 0.0f, 0.0f},
-            (vec3){0.0f, 1.0f, 0.0f},
-            view);
-        glm_perspective(glm_rad(45.0f), 800.0f / 800.0f, 0.1f, 100.0f, proj);
-        glm_mat4_mul(proj, view, view_proj);
-        float angle = 0.0f; //(float)glfwGetTime();
-        glm_mat4_identity(model);
-        glm_rotate(model, angle, (vec3){0.5774f, 0.5774f, 0.5774f});
-        glm_mat4_mul(view_proj, model, mvp);
+        // Creating MVP's and normal matrices:
+        Modify(view_proj, &core);
+        Modify(view_proj, &ocean);
+        Modify(view_proj, &moon);
 
-        mat3 nmodel;
-        glm_mat4_inv(model, tmp);
-        glm_mat4_transpose(tmp);
-        glm_mat4_pick3(tmp, nmodel);
-
-        vec3 ldir = {1.0f, 0.0f, -1.0f};
-        glm_normalize(ldir);
-
-        glUseProgram(core.shader_prog);
-        glUniformMatrix4fv(glGetUniformLocation(core.shader_prog, "uMVP"), 1, GL_FALSE, (float *)mvp);
-        glUniformMatrix4fv(glGetUniformLocation(core.shader_prog, "uModel"), 1, GL_FALSE, (float *)model);
-        glUniformMatrix3fv(glGetUniformLocation(core.shader_prog, "uNormMat"), 1, GL_FALSE, (float *)nmodel);
-        glUniform3f(glGetUniformLocation(core.shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
-        glDisable(GL_CULL_FACE);
-        glDisable(GL_BLEND);
-        glDepthMask(GL_TRUE);
-        glBindVertexArray(core.VAO);
-        glDrawElements(GL_TRIANGLES, core.i_num, GL_UNSIGNED_INT, 0);
-
-        glUseProgram(ocean.shader_prog);
-        glUniformMatrix4fv(glGetUniformLocation(ocean.shader_prog, "uMVP"), 1, GL_FALSE, (float *)mvp);
-        glUniformMatrix4fv(glGetUniformLocation(ocean.shader_prog, "uModel"), 1, GL_FALSE, (float *)model);
-        glUniformMatrix3fv(glGetUniformLocation(ocean.shader_prog, "uNormMat"), 1, GL_FALSE, (float *)nmodel);
-        glUniform3f(glGetUniformLocation(ocean.shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDepthMask(GL_FALSE);
-        glBindVertexArray(ocean.VAO);
-        glDrawElements(GL_TRIANGLES, ocean.i_num, GL_UNSIGNED_INT, 0);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        Render(&core, ldir);
+        Render(&ocean, ldir);
+        Render(&moon, ldir);
 
         glfwSwapBuffers(window);
         // debug:
@@ -291,7 +274,7 @@ void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int sli
     }
 }
 
-void getWaterHeight(Obj *planet, Obj *satelite, Obj *water)
+void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water)
 {
     float d = sqrt((planet->pos[0] - satelite->pos[0]) * (planet->pos[0] - satelite->pos[0]) + (planet->pos[1] - satelite->pos[1]) * (planet->pos[1] - satelite->pos[1]) + (planet->pos[2] - satelite->pos[2]) * (planet->pos[2] - satelite->pos[2]));
     float h0 = water->r - planet->r;
@@ -311,17 +294,50 @@ void getWaterHeight(Obj *planet, Obj *satelite, Obj *water)
         {
             float theta = (float)j * 2.0f * M_PI / water->slices;
             vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
-            // printf("normal = %f %f %f\n", normal[0], normal[1], normal[2]);
             glm_normalize(normal);
             float cos_gamma = glm_dot(Fdir, normal);
-            float h = h0 * 0.75f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (cos_gamma * cos_gamma - 1);
+            float h = TideScale * 0.75f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (cos_gamma * cos_gamma - 1);
             water->vertices[vidx++] = normal[0] * (water->r + h);
             water->vertices[vidx++] = normal[1] * (water->r + h);
             water->vertices[vidx++] = normal[2] * (water->r + h);
-            // printf("new height = %f| cos_gamma = %f\n", h, cos_gamma);
-            // printf("H0 = %f", h0);
         }
     }
+}
+
+void Modify(mat4 ProjView, Obj *O)
+{
+    glm_mat4_identity(O->model);
+    glm_translate(O->model, O->pos);
+    glm_mat4_mul(ProjView, O->model, O->mvp);
+    mat4 tmp;
+    glm_mat4_inv(O->model, tmp);
+    glm_mat4_transpose(tmp);
+    glm_mat4_pick3(tmp, O->nmodel);
+}
+
+void Render(Obj *O, vec3 ldir)
+{
+    glUseProgram(O->shader_prog);
+    glUniformMatrix4fv(glGetUniformLocation(O->shader_prog, "uMVP"), 1, GL_FALSE, (float *)O->mvp);
+    glUniformMatrix3fv(glGetUniformLocation(O->shader_prog, "uNormMat"), 1, GL_FALSE, (float *)O->nmodel);
+    glUniform4f(glGetUniformLocation(O->shader_prog, "uCol"), O->col[0], O->col[1], O->col[2], O->col[3]);
+    glUniform3f(glGetUniformLocation(O->shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
+    if (O->mode == SOLID)
+    {
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+    }
+    else if (O->mode == FLUID)
+    {
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+    }
+    glBindVertexArray(O->VAO);
+    glDrawElements(GL_TRIANGLES, O->i_num, GL_UNSIGNED_INT, 0);
 }
 
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
