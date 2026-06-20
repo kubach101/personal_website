@@ -7,13 +7,14 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define Tscale 100
+#define Tscale 1.0E3
 #define Mscale 1.0E22
 #define Rscale 1.0E8
 #define Ascale Rscale / Tscale / Tscale
 #define Fscale Mscale *Ascale
 #define G 6.67E-11 * Rscale * Rscale * Rscale / (Mscale * Tscale * Tscale)
 #define TideScale 100
+#define TimeAccel 100
 
 const char *vert =
     "#version 330 core\n"
@@ -71,7 +72,7 @@ typedef struct
     GLuint shader_prog;
     float mass, r;
     vec3 pos;
-    mat4 mvp, model;
+    mat4 mvp;
     mat3 nmodel;
     vec4 col;
     int mode;
@@ -88,12 +89,13 @@ void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
 void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
 void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water);
-void Modify(mat4 ProjView, Obj *O);
-void Render(Obj *O, vec3 ldir);
+void Modify(mat4 proj_view, Obj *o, float orb_angle, vec3 orb_axis);
+void Render(Obj *o, vec3 ldir);
+float AngVel(Obj *satelite, Obj *planet);
 int main()
 {
     // planet core:
-    Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.06378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
+    Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.06378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
     core.r = 0.3f;
     core.stacks = 36;
     core.slices = 36;
@@ -104,7 +106,7 @@ int main()
     DrawSphere(core.vertices, core.indices, core.r, core.stacks, core.slices);
 
     // ocean:
-    Obj ocean = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.067f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.4f}, FLUID};
+    Obj ocean = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.067f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.4f}, FLUID};
     ocean.r = 0.38f;
     ocean.stacks = 42;
     ocean.slices = 42;
@@ -114,7 +116,8 @@ int main()
     ocean.indices = malloc(sizeof(GLuint) * ocean.i_num);
     DrawSphere(ocean.vertices, ocean.indices, ocean.r, ocean.stacks, ocean.slices);
 
-    Obj moon = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7.35f, 0.017374f, {3.85f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.6f, 0.6f, 0.6f, 1.0f}, SOLID};
+    // previous x = 3.85
+    Obj moon = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7.35f, 0.017374f, {3.85f, 0.0f, 0.0f}, {0}, {0}, {0.0f, 1.0f, 0.0f, 1.0f}, SOLID};
     moon.r = 0.1f;
     moon.stacks = 24;
     moon.slices = 24;
@@ -175,36 +178,43 @@ int main()
 
     bool reshape = true;
 
-    // visual details:
     mat4 view, proj, view_proj;
     glm_perspective(glm_rad(45.0f), 800 / 800, 0.1f, 100.0f, proj);
     glm_lookat(
-        (vec3){0.0f, 0.0f, 30.0f},
+        (vec3){0.0f, 0.0f, 17.5f},
         (vec3){0.0f, 0.0f, 0.0f},
         (vec3){0.0f, 1.0f, 0.0f},
         view);
     glm_mat4_mul(proj, view, view_proj);
 
     vec3 ldir = {1.0f, 0.0f, -1.0f};
-    glm_normalize(ldir);
+    float angle = 0.0f;
 
+    glfwSetTime(0);
+    float dt = 0.0f;
     while (!glfwWindowShouldClose(window))
     {
+        dt = glfwGetTime();
+        // printf("delta time = %f\n", dt);
+        glfwSetTime(0);
+
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Reshape water
         if (reshape)
         {
             ShapeWaterLayer(&core, &moon, &ocean);
             sendData(ocean, GL_DYNAMIC_DRAW);
-            moon.pos[0] -= 0.00001f;
         }
+        double omega = AngVel(&moon, &core);
+        // printf("ang. velocity = %f\n", omega);
+        angle += TimeAccel * omega * dt * Tscale;
+        // printf("angle = %f\n", angle);
 
         // Creating MVP's and normal matrices:
-        Modify(view_proj, &core);
-        Modify(view_proj, &ocean);
-        Modify(view_proj, &moon);
+        Modify(view_proj, &core, 0.0f, (vec3){1.0f, 0.0f, 0.0f});
+        Modify(view_proj, &ocean, 0.0f, (vec3){1.0f, 0.0f, 0.0f});
+        Modify(view_proj, &moon, angle, (vec3){0.0f, 0.0f, 1.0f});
 
         Render(&core, ldir);
         Render(&ocean, ldir);
@@ -258,18 +268,18 @@ void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int sli
     {
         for (int j = 0; j < slices; j++)
         {
-            int A = i * (slices + 1) + j;
-            int B = i * (slices + 1) + j + 1;
-            int C = (i + 1) * (slices + 1) + j;
-            int D = (i + 1) * (slices + 1) + j + 1;
+            int a = i * (slices + 1) + j;
+            int b = i * (slices + 1) + j + 1;
+            int c = (i + 1) * (slices + 1) + j;
+            int d = (i + 1) * (slices + 1) + j + 1;
 
-            indices[iidx++] = A;
-            indices[iidx++] = B;
-            indices[iidx++] = C;
+            indices[iidx++] = a;
+            indices[iidx++] = b;
+            indices[iidx++] = c;
 
-            indices[iidx++] = B;
-            indices[iidx++] = D;
-            indices[iidx++] = C;
+            indices[iidx++] = b;
+            indices[iidx++] = d;
+            indices[iidx++] = c;
         }
     }
 }
@@ -304,31 +314,44 @@ void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water)
     }
 }
 
-void Modify(mat4 ProjView, Obj *O)
+void Modify(mat4 proj_view, Obj *o, float orb_angle, vec3 orb_axis)
 {
-    glm_mat4_identity(O->model);
-    glm_translate(O->model, O->pos);
-    glm_mat4_mul(ProjView, O->model, O->mvp);
+    mat4 model;
+    glm_mat4_identity(model);
+    if (orb_angle != 0.0f)
+    {
+        glm_normalize(orb_axis);
+        glm_rotate(model, orb_angle, orb_axis);
+    }
+    glm_translate(model, o->pos);
+    glm_mat4_mul(proj_view, model, o->mvp);
     mat4 tmp;
-    glm_mat4_inv(O->model, tmp);
+    glm_mat4_inv(model, tmp);
     glm_mat4_transpose(tmp);
-    glm_mat4_pick3(tmp, O->nmodel);
+    glm_mat4_pick3(tmp, o->nmodel);
 }
 
-void Render(Obj *O, vec3 ldir)
+float AngVel(Obj *satelite, Obj *planet)
 {
-    glUseProgram(O->shader_prog);
-    glUniformMatrix4fv(glGetUniformLocation(O->shader_prog, "uMVP"), 1, GL_FALSE, (float *)O->mvp);
-    glUniformMatrix3fv(glGetUniformLocation(O->shader_prog, "uNormMat"), 1, GL_FALSE, (float *)O->nmodel);
-    glUniform4f(glGetUniformLocation(O->shader_prog, "uCol"), O->col[0], O->col[1], O->col[2], O->col[3]);
-    glUniform3f(glGetUniformLocation(O->shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
-    if (O->mode == SOLID)
+    float d = sqrt((planet->pos[0] - satelite->pos[0]) * (planet->pos[0] - satelite->pos[0]) + (planet->pos[1] - satelite->pos[1]) * (planet->pos[1] - satelite->pos[1]) + (planet->pos[2] - satelite->pos[2]) * (planet->pos[2] - satelite->pos[2]));
+    float omega = sqrt(G * planet->mass / d);
+    return omega;
+}
+
+void Render(Obj *o, vec3 ldir)
+{
+    glUseProgram(o->shader_prog);
+    glUniformMatrix4fv(glGetUniformLocation(o->shader_prog, "uMVP"), 1, GL_FALSE, (float *)o->mvp);
+    glUniformMatrix3fv(glGetUniformLocation(o->shader_prog, "uNormMat"), 1, GL_FALSE, (float *)o->nmodel);
+    glUniform4f(glGetUniformLocation(o->shader_prog, "uCol"), o->col[0], o->col[1], o->col[2], o->col[3]);
+    glUniform3f(glGetUniformLocation(o->shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
+    if (o->mode == SOLID)
     {
         glDisable(GL_CULL_FACE);
         glDisable(GL_BLEND);
         glDepthMask(GL_TRUE);
     }
-    else if (O->mode == FLUID)
+    else if (o->mode == FLUID)
     {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
@@ -336,8 +359,8 @@ void Render(Obj *O, vec3 ldir)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);
     }
-    glBindVertexArray(O->VAO);
-    glDrawElements(GL_TRIANGLES, O->i_num, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(o->VAO);
+    glDrawElements(GL_TRIANGLES, o->i_num, GL_UNSIGNED_INT, 0);
 }
 
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
