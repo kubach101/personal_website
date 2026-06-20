@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 
 #define Tscale 1.0E3
 #define Mscale 1.0E22
@@ -13,7 +14,7 @@
 #define Ascale Rscale / Tscale / Tscale
 #define Fscale Mscale *Ascale
 #define G 6.67E-11 * Rscale * Rscale * Rscale / (Mscale * Tscale * Tscale)
-#define TideScale 100
+#define TideAccel 50000
 #define TimeAccel 100
 
 const char *vert =
@@ -71,7 +72,7 @@ typedef struct
     int stacks, slices;
     GLuint shader_prog;
     float mass, r;
-    vec3 pos;
+    vec3 pos0, pos;
     mat4 mvp;
     mat3 nmodel;
     vec4 col;
@@ -89,13 +90,16 @@ void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
 void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
 void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water);
-void Modify(mat4 proj_view, Obj *o, float orb_angle, vec3 orb_axis);
+void Modify(mat4 proj_view, Obj *o);
 void Render(Obj *o, vec3 ldir);
 float AngVel(Obj *satelite, Obj *planet);
+void GetPositionOrbit(Obj *o, float angle, vec3 axis, vec3 axis_pos);
+void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up);
+void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 ang_xy);
 int main()
 {
     // planet core:
-    Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.06378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
+    Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.06378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
     core.r = 0.3f;
     core.stacks = 36;
     core.slices = 36;
@@ -106,7 +110,7 @@ int main()
     DrawSphere(core.vertices, core.indices, core.r, core.stacks, core.slices);
 
     // ocean:
-    Obj ocean = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.067f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.4f}, FLUID};
+    Obj ocean = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.167f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.4f}, FLUID};
     ocean.r = 0.38f;
     ocean.stacks = 42;
     ocean.slices = 42;
@@ -117,7 +121,7 @@ int main()
     DrawSphere(ocean.vertices, ocean.indices, ocean.r, ocean.stacks, ocean.slices);
 
     // previous x = 3.85
-    Obj moon = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7.35f, 0.017374f, {3.85f, 0.0f, 0.0f}, {0}, {0}, {0.0f, 1.0f, 0.0f, 1.0f}, SOLID};
+    Obj moon = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7.35f, 0.017374f, {3.85f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 1.0f, 0.0f, 1.0f}, SOLID};
     moon.r = 0.1f;
     moon.stacks = 24;
     moon.slices = 24;
@@ -126,6 +130,10 @@ int main()
     moon.vertices = malloc(sizeof(GLfloat) * moon.v_num);
     moon.indices = malloc(sizeof(GLuint) * moon.i_num);
     DrawSphere(moon.vertices, moon.indices, moon.r, moon.stacks, moon.slices);
+    for (int i = 0; i < 3; i++)
+    {
+        moon.pos[i] = moon.pos0[i];
+    }
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -177,19 +185,16 @@ int main()
     glfwSwapBuffers(window);
 
     bool reshape = true;
+    bool update_vision = false;
 
-    mat4 view, proj, view_proj;
-    glm_perspective(glm_rad(45.0f), 800 / 800, 0.1f, 100.0f, proj);
-    glm_lookat(
-        (vec3){0.0f, 0.0f, 17.5f},
-        (vec3){0.0f, 0.0f, 0.0f},
-        (vec3){0.0f, 1.0f, 0.0f},
-        view);
-    glm_mat4_mul(proj, view, view_proj);
-
+    mat4 proj_view;
+    vec3 eye0 = {0.0f, 0.0f, 15.0f};
+    vec3 up0 = {0.0f, 1.0f, 0.0f};
+    vec2 ang_xy = {0};
+    vec3 eye, up;
+    UpdateProjView(proj_view, 1.0f, eye0, up0);
     vec3 ldir = {1.0f, 0.0f, -1.0f};
     float angle = 0.0f;
-
     glfwSetTime(0);
     float dt = 0.0f;
     while (!glfwWindowShouldClose(window))
@@ -207,14 +212,28 @@ int main()
             sendData(ocean, GL_DYNAMIC_DRAW);
         }
         double omega = AngVel(&moon, &core);
-        // printf("ang. velocity = %f\n", omega);
-        angle += TimeAccel * omega * dt * Tscale;
+        // printf("ang. vel. = %lf\n", omega);
+        angle += omega * dt * Tscale * TimeAccel;
         // printf("angle = %f\n", angle);
+        angle = fmod(angle, 2 * M_PI);
+        GetPositionOrbit(&moon, angle, (vec3){0.0f, 1.0f, 0.0f}, (vec3){0.0f, 0.0f, 0.0f});
+        // printf("moon_pos0: |%f|%f|%f|\n", moon.pos0[0], moon.pos0[1], moon.pos0[2]);
+        // printf("moon_pos: |%f|%f|%f|\n", moon.pos[0], moon.pos[1], moon.pos[2]);
+        if (update_vision)
+        {
+            ang_xy[0] = fmod(ang_xy[0], 2 * M_PI);
+            ang_xy[1] = fmod(ang_xy[1], 2 * M_PI);
+
+            RotateEye(eye, up, eye0, up0, ang_xy);
+            UpdateProjView(proj_view, 1.0f, eye, up);
+            update_vision = false;
+        }
 
         // Creating MVP's and normal matrices:
-        Modify(view_proj, &core, 0.0f, (vec3){1.0f, 0.0f, 0.0f});
-        Modify(view_proj, &ocean, 0.0f, (vec3){1.0f, 0.0f, 0.0f});
-        Modify(view_proj, &moon, angle, (vec3){0.0f, 0.0f, 1.0f});
+
+        Modify(proj_view, &core);
+        Modify(proj_view, &ocean);
+        Modify(proj_view, &moon);
 
         Render(&core, ldir);
         Render(&ocean, ldir);
@@ -223,6 +242,43 @@ int main()
         glfwSwapBuffers(window);
         // debug:
         glfwPollEvents();
+
+        if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS)
+        {
+            eye0[2] -= 0.01f;
+            printf("recived: M\n");
+            update_vision = true;
+        }
+        if (glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS)
+        {
+            eye0[2] += 0.01f;
+            printf("recived: N\n");
+            update_vision = true;
+        }
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+        {
+            ang_xy[1] -= 0.2f / 180.0f * M_PI;
+            printf("recived: arrowR\n");
+            update_vision = true;
+        }
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+        {
+            ang_xy[1] += 0.2f / 180.0f * M_PI;
+            printf("recived: arrowL\n");
+            update_vision = true;
+        }
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+        {
+            ang_xy[0] -= 0.2f / 180.0f * M_PI;
+            printf("recived: arrowU\n");
+            update_vision = true;
+        }
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+        {
+            ang_xy[0] += 0.2f / 180.0f * M_PI;
+            printf("recived: arrowD\n");
+            update_vision = true;
+        }
     }
 
     glfwDestroyWindow(window);
@@ -306,7 +362,7 @@ void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water)
             vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
             glm_normalize(normal);
             float cos_gamma = glm_dot(Fdir, normal);
-            float h = TideScale * 0.75f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (cos_gamma * cos_gamma - 1);
+            float h = TideAccel * 0.75f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (cos_gamma * cos_gamma - 1);
             water->vertices[vidx++] = normal[0] * (water->r + h);
             water->vertices[vidx++] = normal[1] * (water->r + h);
             water->vertices[vidx++] = normal[2] * (water->r + h);
@@ -314,15 +370,10 @@ void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water)
     }
 }
 
-void Modify(mat4 proj_view, Obj *o, float orb_angle, vec3 orb_axis)
+void Modify(mat4 proj_view, Obj *o)
 {
     mat4 model;
     glm_mat4_identity(model);
-    if (orb_angle != 0.0f)
-    {
-        glm_normalize(orb_axis);
-        glm_rotate(model, orb_angle, orb_axis);
-    }
     glm_translate(model, o->pos);
     glm_mat4_mul(proj_view, model, o->mvp);
     mat4 tmp;
@@ -333,9 +384,39 @@ void Modify(mat4 proj_view, Obj *o, float orb_angle, vec3 orb_axis)
 
 float AngVel(Obj *satelite, Obj *planet)
 {
+    /*for (int i = 0; i < 3; i++)
+    {
+        printf("pos/sat[%d]= %f | pos/plan[%d] = %f\n", i, satelite->pos[i], i, planet->pos[i]);
+    }*/
     float d = sqrt((planet->pos[0] - satelite->pos[0]) * (planet->pos[0] - satelite->pos[0]) + (planet->pos[1] - satelite->pos[1]) * (planet->pos[1] - satelite->pos[1]) + (planet->pos[2] - satelite->pos[2]) * (planet->pos[2] - satelite->pos[2]));
+    // printf("d = %f\n", d);
     float omega = sqrt(G * planet->mass / d);
     return omega;
+}
+
+void GetPositionOrbit(Obj *o, float angle, vec3 axis, vec3 axis_pos)
+{
+
+    for (int i = 0; i < 3; i++)
+    {
+        o->pos[i] = o->pos0[i] - axis_pos[i];
+        // printf("pos[i] = %f\n", o->pos[i]);
+    }
+    glm_vec3_rotate(o->pos, angle, axis);
+
+    for (int i = 0; i < 3; i++)
+    {
+        // printf("pos_rotated[i] = %f\n", o->pos[i]);
+        o->pos[i] += axis_pos[i];
+    }
+}
+
+void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up)
+{
+    mat4 view, proj;
+    glm_perspective(glm_rad(45.0f), 800.0f / 800.0f, 0.1f, 100.0f, proj);
+    glm_lookat(eye, (vec3){0.0f, 0.0f, 0.0f}, up, view);
+    glm_mat4_mul(proj, view, proj_view);
 }
 
 void Render(Obj *o, vec3 ldir)
@@ -361,6 +442,18 @@ void Render(Obj *o, vec3 ldir)
     }
     glBindVertexArray(o->VAO);
     glDrawElements(GL_TRIANGLES, o->i_num, GL_UNSIGNED_INT, 0);
+}
+
+void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 ang_xy)
+{
+    memcpy(eye, eye0, sizeof(vec3));
+    memcpy(up, up0, sizeof(vec3));
+
+    glm_vec3_rotate(eye, ang_xy[0], (vec3){1.0f, 0.0f, 0.0f});
+    glm_vec3_rotate(up, ang_xy[0], (vec3){1.0f, 0.0f, 0.0f});
+
+    glm_vec3_rotate(eye, ang_xy[1], (vec3){0.0f, 1.0f, 0.0f});
+    glm_vec3_rotate(up, ang_xy[1], (vec3){0.0f, 1.0f, 0.0f});
 }
 
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
