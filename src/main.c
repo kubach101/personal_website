@@ -29,22 +29,6 @@ const char *vert =
     "    normal = normalize(uNormMat * aPos);\n"
     "}\n";
 
-/*
-const char *fragmentShaderSource =
-    "#version 330 core\n"
-    "out vec4 FragColor;\n"
-    "in vec3 normal;\n"
-    "uniform vec3 uLDir;\n"
-    "void main()\n"
-    "{\n"
-    "    float diff = max(dot(normal, -uLDir), 0.0);\n"
-    "    vec3 col = vec3(1.0, 0.0, 0.0);\n"
-    "    col *= diff;\n"
-    "    col += vec3(0.2, 0.0, 0.0);\n"
-    "    FragColor = vec4(col, 1.0);\n"
-    "}\n";
-*/
-
 const char *frag =
     "#version 330 core\n"
     "out vec4 fragCol;\n"
@@ -79,6 +63,25 @@ typedef struct
     int mode;
 } Obj;
 
+typedef struct
+{
+    vec3 pos;
+    float d, ang, ang_v;
+} SateliteInfo;
+
+typedef struct
+{
+    float hmax, hmin;
+    vec3 hmax_pos, hmin_pos;
+    bool friction;
+} OceanInfo;
+
+typedef struct
+{
+    char top[60];
+    char bottom[60];
+} Tab;
+
 enum RenderType
 {
     SOLID = 0,
@@ -89,15 +92,18 @@ void sendData(Obj object, GLenum usage);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
 void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int slices);
-void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water);
+void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water, SateliteInfo *sinfo, OceanInfo *oinfo);
 void Modify(mat4 proj_view, Obj *o);
 void Render(Obj *o, vec3 ldir);
 float AngVel(Obj *satelite, Obj *planet);
 void GetPositionOrbit(Obj *o, float angle, vec3 axis, vec3 axis_pos);
 void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up);
 void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 ang_xy);
+void printInfoTab(SateliteInfo *si, OceanInfo *oi);
+
 int main()
 {
+
     // planet core:
     Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.06378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
     core.r = 0.3f;
@@ -184,6 +190,9 @@ int main()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glfwSwapBuffers(window);
 
+    SateliteInfo sinfo;
+    OceanInfo oinfo;
+
     bool reshape = true;
     bool update_vision = false;
 
@@ -208,7 +217,7 @@ int main()
 
         if (reshape)
         {
-            ShapeWaterLayer(&core, &moon, &ocean);
+            ShapeWaterLayer(&core, &moon, &ocean, &sinfo, &oinfo);
             sendData(ocean, GL_DYNAMIC_DRAW);
         }
         double omega = AngVel(&moon, &core);
@@ -240,43 +249,52 @@ int main()
         Render(&moon, ldir);
 
         glfwSwapBuffers(window);
-        // debug:
+
+        sinfo.ang = angle;
+        sinfo.ang_v = omega;
+        sinfo.d = 0.0f;
+        memcpy(sinfo.pos, moon.pos, 3 * sizeof(float));
+
+        oinfo.friction = false;
+
+        printInfoTab(&sinfo, &oinfo);
+
         glfwPollEvents();
 
         if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS)
         {
             eye0[2] -= 0.01f;
-            printf("recived: M\n");
+            // printf("recived: M\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS)
         {
             eye0[2] += 0.01f;
-            printf("recived: N\n");
+            // printf("recived: N\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
         {
             ang_xy[1] -= 0.2f / 180.0f * M_PI;
-            printf("recived: arrowR\n");
+            // printf("recived: arrowR\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
         {
             ang_xy[1] += 0.2f / 180.0f * M_PI;
-            printf("recived: arrowL\n");
+            // printf("recived: arrowL\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
         {
             ang_xy[0] -= 0.2f / 180.0f * M_PI;
-            printf("recived: arrowU\n");
+            // printf("recived: arrowU\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
         {
             ang_xy[0] += 0.2f / 180.0f * M_PI;
-            printf("recived: arrowD\n");
+            // printf("recived: arrowD\n");
             update_vision = true;
         }
     }
@@ -340,10 +358,11 @@ void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int sli
     }
 }
 
-void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water)
+void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water, SateliteInfo *sinfo, OceanInfo *oinfo)
 {
     float d = sqrt((planet->pos[0] - satelite->pos[0]) * (planet->pos[0] - satelite->pos[0]) + (planet->pos[1] - satelite->pos[1]) * (planet->pos[1] - satelite->pos[1]) + (planet->pos[2] - satelite->pos[2]) * (planet->pos[2] - satelite->pos[2]));
     float h0 = water->r - planet->r;
+    sinfo->d = d;
 
     int vidx = 0;
     vec3 Fdir;
@@ -363,6 +382,20 @@ void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water)
             glm_normalize(normal);
             float cos_gamma = glm_dot(Fdir, normal);
             float h = TideAccel * 0.75f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (cos_gamma * cos_gamma - 1);
+            if (cos_gamma = 1.0f)
+            {
+                oinfo->hmax = h;
+                oinfo->hmax_pos[0] = planet->r + h;
+                oinfo->hmax_pos[1] = theta;
+                oinfo->hmax_pos[2] = phi;
+            }
+            if (cos_gamma = 0, 707106781186547)
+            {
+                oinfo->hmin = h;
+                oinfo->hmin_pos[0] = planet->r + h;
+                oinfo->hmin_pos[1] = theta;
+                oinfo->hmin_pos[2] = phi;
+            }
             water->vertices[vidx++] = normal[0] * (water->r + h);
             water->vertices[vidx++] = normal[1] * (water->r + h);
             water->vertices[vidx++] = normal[2] * (water->r + h);
@@ -496,4 +529,25 @@ void cleanup(GLuint VAO, GLuint VBO, GLuint EBO)
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
+}
+
+void printInfoTab(SateliteInfo *sinfo, OceanInfo *oinfo)
+{
+    Tab stab = {{"Satelite\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"},
+                {"////////////////////////////////////////////"}};
+
+    Tab otab = {{"Ocean\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"},
+                {"////////////////////////////////////////////"}};
+
+    for (int i = 0; i < 14; i++)
+    {
+        printf("\033[1A\r");
+        printf("                                                            ");
+        fflush(stdin);
+    }
+
+    printf("\r%s\nposition: (%f;%f;%f)\ndistance: %f\nangle: %f\nangular velocity: %f\n%s\n\n", stab.top, sinfo->pos[0], sinfo->pos[1], sinfo->pos[2], sinfo->d, sinfo->ang, sinfo->ang_v, stab.bottom);
+    fflush(stdin);
+    printf("%s\nHmax: %f\nHmax-pos: (%f;%f;%f)\nHmin: %f\nHmin-pos:(%f;%f;%f)\nfriction: %s\n%s\n", otab.top, oinfo->hmax, oinfo->hmax_pos[0], oinfo->hmax_pos[1], oinfo->hmax_pos[2], oinfo->hmin, oinfo->hmin_pos[0], oinfo->hmin_pos[1], oinfo->hmin_pos[2], oinfo->friction ? "ON" : "OFF", otab.bottom);
+    fflush(stdin);
 }
