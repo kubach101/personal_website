@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <float.h>
 
 #define Tscale 1.0E3
 #define Mscale 1.0E22
@@ -14,7 +15,7 @@
 #define Ascale Rscale / Tscale / Tscale
 #define Fscale Mscale *Ascale
 #define G 6.67E-11 * Rscale * Rscale * Rscale / (Mscale * Tscale * Tscale)
-#define TideAccel 50000
+#define TideAccel 500
 #define TimeAccel 100
 
 const char *vert =
@@ -78,8 +79,8 @@ typedef struct
 
 typedef struct
 {
-    char top[60];
-    char bottom[60];
+    char top[128];
+    char bottom[128];
 } Tab;
 
 enum RenderType
@@ -105,8 +106,7 @@ int main()
 {
 
     // planet core:
-    Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.06378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
-    core.r = 0.3f;
+    Obj core = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 597.2f, 0.6378f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {1.0f, 0.0f, 0.0f, 1.0f}, SOLID};
     core.stacks = 36;
     core.slices = 36;
     core.v_num = (core.stacks + 1) * (core.slices + 1) * 3;
@@ -116,8 +116,7 @@ int main()
     DrawSphere(core.vertices, core.indices, core.r, core.stacks, core.slices);
 
     // ocean:
-    Obj ocean = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.167f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.4f}, FLUID};
-    ocean.r = 0.38f;
+    Obj ocean = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.67f, {0.0f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.4f}, FLUID};
     ocean.stacks = 42;
     ocean.slices = 42;
     ocean.v_num = (ocean.stacks + 1) * (ocean.slices + 1) * 3;
@@ -127,8 +126,7 @@ int main()
     DrawSphere(ocean.vertices, ocean.indices, ocean.r, ocean.stacks, ocean.slices);
 
     // previous x = 3.85
-    Obj moon = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7.35f, 0.017374f, {3.85f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 1.0f, 0.0f, 1.0f}, SOLID};
-    moon.r = 0.1f;
+    Obj moon = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7.35f, 0.17374f, {3.85f, 0.0f, 0.0f}, {0}, {0}, {0}, {0.0f, 1.0f, 0.0f, 1.0f}, SOLID};
     moon.stacks = 24;
     moon.slices = 24;
     moon.v_num = (moon.stacks + 1) * (moon.slices + 1) * 3;
@@ -190,11 +188,12 @@ int main()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glfwSwapBuffers(window);
 
-    SateliteInfo sinfo;
-    OceanInfo oinfo;
+    SateliteInfo sinfo = {0};
+    OceanInfo oinfo = {0};
 
     bool reshape = true;
     bool update_vision = false;
+    // float acc_time = 0.0f;
 
     mat4 proj_view;
     vec3 eye0 = {0.0f, 0.0f, 15.0f};
@@ -225,6 +224,8 @@ int main()
         angle += omega * dt * Tscale * TimeAccel;
         // printf("angle = %f\n", angle);
         angle = fmod(angle, 2 * M_PI);
+        // printf("\033[1A\r            ");
+        // printf("\n angle = %f", angle);
         GetPositionOrbit(&moon, angle, (vec3){0.0f, 1.0f, 0.0f}, (vec3){0.0f, 0.0f, 0.0f});
         // printf("moon_pos0: |%f|%f|%f|\n", moon.pos0[0], moon.pos0[1], moon.pos0[2]);
         // printf("moon_pos: |%f|%f|%f|\n", moon.pos[0], moon.pos[1], moon.pos[2]);
@@ -250,50 +251,51 @@ int main()
 
         glfwSwapBuffers(window);
 
+        // acc_time += dt;
+
         sinfo.ang = angle;
         sinfo.ang_v = omega;
         sinfo.d = 0.0f;
         memcpy(sinfo.pos, moon.pos, 3 * sizeof(float));
 
         oinfo.friction = false;
-
         printInfoTab(&sinfo, &oinfo);
 
         glfwPollEvents();
 
         if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS)
         {
-            eye0[2] -= 0.01f;
+            eye0[2] -= 0.5f;
             // printf("recived: M\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS)
         {
-            eye0[2] += 0.01f;
+            eye0[2] += 0.5f;
             // printf("recived: N\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
         {
-            ang_xy[1] -= 0.2f / 180.0f * M_PI;
+            ang_xy[1] -= 1.0f / 180.0f * M_PI;
             // printf("recived: arrowR\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
         {
-            ang_xy[1] += 0.2f / 180.0f * M_PI;
+            ang_xy[1] += 1.0f / 180.0f * M_PI;
             // printf("recived: arrowL\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
         {
-            ang_xy[0] -= 0.2f / 180.0f * M_PI;
+            ang_xy[0] -= 1.0f / 180.0f * M_PI;
             // printf("recived: arrowU\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
         {
-            ang_xy[0] += 0.2f / 180.0f * M_PI;
+            ang_xy[0] += 1.0f / 180.0f * M_PI;
             // printf("recived: arrowD\n");
             update_vision = true;
         }
@@ -360,18 +362,21 @@ void DrawSphere(GLfloat *vertices, GLuint *indices, float r, int stacks, int sli
 
 void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water, SateliteInfo *sinfo, OceanInfo *oinfo)
 {
-    float d = sqrt((planet->pos[0] - satelite->pos[0]) * (planet->pos[0] - satelite->pos[0]) + (planet->pos[1] - satelite->pos[1]) * (planet->pos[1] - satelite->pos[1]) + (planet->pos[2] - satelite->pos[2]) * (planet->pos[2] - satelite->pos[2]));
+    // float d = sqrt((planet->pos[0] - satelite->pos[0]) * (planet->pos[0] - satelite->pos[0]) + (planet->pos[1] - satelite->pos[1]) * (planet->pos[1] - satelite->pos[1]) + (planet->pos[2] - satelite->pos[2]) * (planet->pos[2] - satelite->pos[2]));
     float h0 = water->r - planet->r;
-    sinfo->d = d;
-
     int vidx = 0;
     vec3 Fdir;
     vec3 diff = {
         satelite->pos[0] - planet->pos[0],
         satelite->pos[1] - planet->pos[1],
         satelite->pos[2] - planet->pos[2]};
+
+    float d = sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
+    sinfo->d = d;
     glm_normalize_to(diff, Fdir);
 
+    float hmin = FLT_MAX;
+    float hmax = -FLT_MAX;
     for (int i = 0; i <= water->stacks; i++)
     {
         float phi = (float)i * M_PI / water->stacks;
@@ -381,26 +386,33 @@ void ShapeWaterLayer(Obj *planet, Obj *satelite, Obj *water, SateliteInfo *sinfo
             vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
             glm_normalize(normal);
             float cos_gamma = glm_dot(Fdir, normal);
-            float h = TideAccel * 0.75f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (cos_gamma * cos_gamma - 1);
-            if (cos_gamma = 1.0f)
+            float tide = 1.5f * satelite->mass / planet->mass * planet->r * planet->r * planet->r * planet->r / d / d / d * (3 * cos_gamma * cos_gamma - 1);
+            float h = h0 + tide;
+            float ha = h0 + tide * TideAccel;
+            if (h > hmax)
             {
-                oinfo->hmax = h;
+                hmax = h * Rscale;
                 oinfo->hmax_pos[0] = planet->r + h;
                 oinfo->hmax_pos[1] = theta;
                 oinfo->hmax_pos[2] = phi;
+                hmax = h;
             }
-            if (cos_gamma = 0, 707106781186547)
+            if (h < hmin)
             {
-                oinfo->hmin = h;
+                oinfo->hmin = h * Rscale;
                 oinfo->hmin_pos[0] = planet->r + h;
                 oinfo->hmin_pos[1] = theta;
                 oinfo->hmin_pos[2] = phi;
+                hmin = h;
             }
-            water->vertices[vidx++] = normal[0] * (water->r + h);
-            water->vertices[vidx++] = normal[1] * (water->r + h);
-            water->vertices[vidx++] = normal[2] * (water->r + h);
+            water->vertices[vidx++] = normal[0] * (planet->r + ha);
+            water->vertices[vidx++] = normal[1] * (planet->r + ha);
+            water->vertices[vidx++] = normal[2] * (planet->r + ha);
+            // printf("d=%f h0=%f tide_max=%e ha_max=%f\n", d, h0, tide, ha);
         }
     }
+    oinfo->hmax = hmax * Rscale;
+    oinfo->hmin = hmin * Rscale;
 }
 
 void Modify(mat4 proj_view, Obj *o)
@@ -531,7 +543,7 @@ void cleanup(GLuint VAO, GLuint VBO, GLuint EBO)
     glDeleteBuffers(1, &EBO);
 }
 
-void printInfoTab(SateliteInfo *sinfo, OceanInfo *oinfo)
+/*void printInfoTab(SateliteInfo *sinfo, OceanInfo *oinfo)
 {
     Tab stab = {{"Satelite\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"},
                 {"////////////////////////////////////////////"}};
@@ -550,4 +562,41 @@ void printInfoTab(SateliteInfo *sinfo, OceanInfo *oinfo)
     fflush(stdin);
     printf("%s\nHmax: %f\nHmax-pos: (%f;%f;%f)\nHmin: %f\nHmin-pos:(%f;%f;%f)\nfriction: %s\n%s\n", otab.top, oinfo->hmax, oinfo->hmax_pos[0], oinfo->hmax_pos[1], oinfo->hmax_pos[2], oinfo->hmin, oinfo->hmin_pos[0], oinfo->hmin_pos[1], oinfo->hmin_pos[2], oinfo->friction ? "ON" : "OFF", otab.bottom);
     fflush(stdin);
+}*/
+
+void printInfoTab(SateliteInfo *sinfo, OceanInfo *oinfo)
+{
+    static const char sep[] = "////////////////////////////////////////////";
+    static const char ts[] = "Satelite\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
+    static const char to[] = "Ocean\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
+    static char buf[2048];
+    int len = 0;
+
+    len += snprintf(buf + len, sizeof(buf) - len, "\033[14A\033[J");
+
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "\033[93m%s\033[0m\n"
+                    "position: (%f;%f;%f)\n"
+                    "distance: %f\n"
+                    "angle: %f\n"
+                    "angular velocity: %f\n"
+                    "\033[93m%s\033[0m\n\n",
+                    ts,
+                    sinfo->pos[0], sinfo->pos[1], sinfo->pos[2],
+                    sinfo->d, sinfo->ang, sinfo->ang_v, sep);
+
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "\033[96m%s\033[0m\n"
+                    "Hmax: %f\n"
+                    "Hmax-pos: (%f;%f;%f)\n"
+                    "Hmin: %f\n"
+                    "Hmin-pos: (%f;%f;%f)\n"
+                    "friction: %s\n"
+                    "\033[96m%s\033[0m\n",
+                    to, oinfo->hmax, oinfo->hmax_pos[0], oinfo->hmax_pos[1], oinfo->hmax_pos[2],
+                    oinfo->hmin, oinfo->hmin_pos[0], oinfo->hmin_pos[1], oinfo->hmin_pos[2],
+                    oinfo->friction ? "ON" : "OFF", sep);
+
+    fwrite(buf, 1, len, stdout);
+    fflush(stdout);
 }
