@@ -40,11 +40,11 @@ const char *frag =
     "{\n"
     "    float diff = max(dot(normal, -uLDir), 0.0);\n"
     "    fragCol = uCol;\n"
-    "   for(int i =0; i < 3; i++){\n"
-    "       float minCol = fragCol[i]*0.3;\n"
-    "       fragCol[i] = fragCol[i]*0.7;\n"
-    "       fragCol[i] *= diff;\n"
-    "       fragCol[i] += minCol;\n"
+    "    for(int i =0; i < 3; i++){\n"
+    "        float minCol = fragCol[i]*0.3;\n"
+    "        fragCol[i] = fragCol[i]*0.7;\n"
+    "        fragCol[i] *= diff;\n"
+    "        fragCol[i] += minCol;\n"
     "     }\n"
     "}\n";
 
@@ -55,6 +55,7 @@ typedef struct
     int res;
     GLuint VAO, VBO, EBO;
 } Shape;
+/*
 typedef struct
 {
     GLuint VAO, VBO, EBO;
@@ -70,36 +71,28 @@ typedef struct
     vec4 col;
     int mode;
 } Obj;
-
+*/
 typedef struct
 {
-    float mass, dist, rad, ang, ang_vel;
-    vec3 pos, orb_axis;
+    double mass, dist, rad, ang, ang_vel;
+    vec3 orb_axis;
     vec4 color;
     Shape *shape;
 } Satelite;
 
 typedef struct
 {
-    float rad, base_h, h_max, h_min, friction, deviation;
-    vec2 h_max_pos, h_min_pos;
+    double rad, base_h, h_max, h_min, friction, deviation;
     vec4 color;
     Shape shape;
 } Ocean;
 
 typedef struct
 {
-    float mass, rad;
+    double mass, rad;
     Shape *shape;
     vec4 color;
 } Planet;
-
-typedef struct
-{
-    float hmax, hmin;
-    vec3 hmax_pos, hmin_pos;
-    bool friction;
-} OceanInfo;
 
 typedef struct
 {
@@ -120,8 +113,8 @@ GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentS
 void DrawSphere(Shape *Shape);
 void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet);
 void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up);
-void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 ang_xy);
-// void printInfoTab(Satelite *satelite, Ocean *ocean);
+void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 eye_ang);
+void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet);
 void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog, vec3 ldir, mat4 proj_view);
 
 int main()
@@ -149,7 +142,7 @@ int main()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     Shape sphere = {0};
-    sphere.res = 42;
+    sphere.res = 64;
     size_t v_size = sizeof(GLfloat) * (sphere.res + 1) * (2 * sphere.res + 1) * 3;
     size_t i_size = sizeof(GLuint) * sphere.res * sphere.res * 2 * 6;
     sphere.vertices = malloc(v_size);
@@ -162,9 +155,9 @@ int main()
     sendData(&sphere, GL_STATIC_DRAW);
     GLuint shader_prog = createShaderProgram(vert, frag);
 
-    Satelite satelite = {7.35f, 3.85f, 0.17374f, 0.0f, 0.0f, {0}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, &sphere};
+    Satelite satelite = {7.35f, 3.85f, 0.17374f, 0.0f, 0.0f, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.333f, 1.0f}, &sphere};
     Planet planet = {597.2f, 0.6378f, &sphere, {1.0f, 0.0f, 0.0f, 1.0f}};
-    Ocean ocean = {planet.rad + 0.035f, 0.035f, 0.0f, 0.0f, 0.0f, 0.0f, {0}, {0}, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
+    Ocean ocean = {planet.rad + 0.035f, 0.035f, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
     ocean.shape.res = 86;
     v_size = sizeof(GLfloat) * (ocean.shape.res + 1) * (2 * ocean.shape.res + 1) * 3;
     i_size = sizeof(GLuint) * ocean.shape.res * ocean.shape.res * 2 * 6;
@@ -187,7 +180,7 @@ int main()
     mat4 proj_view;
     vec3 eye0 = {0.0f, 0.0f, 15.0f};
     vec3 up0 = {0.0f, 1.0f, 0.0f};
-    vec2 ang_xy = {0};
+    vec2 eye_ang = {0};
     vec3 eye, up;
     UpdateProjView(proj_view, 1.0f, eye0, up0);
     vec3 ldir = {1.0f, 0.0f, -1.0f};
@@ -214,10 +207,10 @@ int main()
         {
 
             // Creating MVP's and normal matrices:       {
-            ang_xy[0] = fmod(ang_xy[0], 2 * M_PI);
-            ang_xy[1] = fmod(ang_xy[1], 2 * M_PI);
+            eye_ang[0] = fmod(eye_ang[0], 2 * M_PI);
+            eye_ang[1] = fmod(eye_ang[1], 2 * M_PI);
 
-            RotateEye(eye, up, eye0, up0, ang_xy);
+            RotateEye(eye, up, eye0, up0, eye_ang);
             UpdateProjView(proj_view, 1.0f, eye, up);
             update_vision = false;
         }
@@ -226,7 +219,7 @@ int main()
 
         glfwSwapBuffers(window);
 
-        // printInfoTab(&sinfo, &oinfo);
+        printInfoTab(&satelite, &ocean, &planet);
 
         glfwPollEvents();
 
@@ -244,25 +237,25 @@ int main()
         }
         if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
         {
-            ang_xy[1] -= 0.3f / 180.0f * M_PI;
+            eye_ang[1] -= 0.3f / 180.0f * M_PI;
             // printf("recived: arrowR\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
         {
-            ang_xy[1] += 0.3f / 180.0f * M_PI;
+            eye_ang[1] += 0.3f / 180.0f * M_PI;
             // printf("recived: arrowL\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
         {
-            ang_xy[0] -= 0.3f / 180.0f * M_PI;
+            eye_ang[0] -= 0.3f / 180.0f * M_PI;
             // printf("recived: arrowU\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
         {
-            ang_xy[0] += 0.3f / 180.0f * M_PI;
+            eye_ang[0] += 0.3f / 180.0f * M_PI;
             // printf("recived: arrowD\n");
             update_vision = true;
         }
@@ -328,8 +321,10 @@ void DrawSphere(Shape *s)
 void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet)
 {
     int vidx = 0;
-    vec3 fdir;
-    glm_normalize_to(satelite->pos, fdir);
+    vec3 fdir = {0};
+    fdir[0] = -satelite->dist;
+    glm_normalize(fdir);
+    glm_vec3_rotate(fdir, satelite->ang, satelite->orb_axis);
 
     ocean->h_min = FLT_MAX;
     ocean->h_max = -FLT_MAX;
@@ -341,29 +336,20 @@ void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet)
             float theta = (float)j * 2.0f * M_PI / ocean->shape.res / 2;
             vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
             glm_normalize(normal);
-            float cos_gamma = -glm_dot(fdir, normal);
-            float tide = 1.5f * satelite->mass / planet->mass * planet->rad * planet->rad * planet->rad * planet->rad / satelite->dist / satelite->dist / satelite->dist * (3 * cos_gamma * cos_gamma - 1);
-            float h = ocean->base_h + tide;
+            double cos_gamma = glm_dot(fdir, normal);
+            double tide = 1.5f * satelite->mass / planet->mass * planet->rad * planet->rad * planet->rad * planet->rad / satelite->dist / satelite->dist / satelite->dist * (3 * cos_gamma * cos_gamma - 1);
+            double h = ocean->base_h + tide;
             if (h > ocean->h_max)
             {
-                ocean->h_max = h * Rscale;
-                ocean->h_max_pos[0] = planet->rad + h;
-                ocean->h_max_pos[1] = theta;
-                ocean->h_max_pos[2] = phi;
                 ocean->h_max = h;
             }
             if (h < ocean->h_min)
             {
-                ocean->h_min = h * Rscale;
-                ocean->h_min_pos[0] = planet->rad + h;
-                ocean->h_min_pos[1] = theta;
-                ocean->h_min_pos[2] = phi;
                 ocean->h_min = h;
             }
             ocean->shape.vertices[vidx++] = normal[0] * (planet->rad + ocean->base_h + tide * TideAccel);
             ocean->shape.vertices[vidx++] = normal[1] * (planet->rad + ocean->base_h + tide * TideAccel);
             ocean->shape.vertices[vidx++] = normal[2] * (planet->rad + ocean->base_h + tide * TideAccel);
-            // printf("d=%f h0=%f tide_max=%e ha_max=%f\n", d, h0, tide, ha);
         }
     }
     ocean->h_max *= Rscale;
@@ -377,43 +363,16 @@ void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up)
     glm_lookat(eye, (vec3){0.0f, 0.0f, 0.0f}, up, view);
     glm_mat4_mul(proj, view, proj_view);
 }
-/*
-void Render(mat4 mvp, mat4 nmodel, vec4 color, GLuint shader_prog, vec3 ldir, int mode)
-{
-    glUseProgram(shader_prog);
-    glUniformMatrix4fv(glGetUniformLocation(shader_prog, "uMVP"), 1, GL_FALSE, (float *)mvp);
-    glUniformMatrix3fv(glGetUniformLocation(shader_prog, "uNormMat"), 1, GL_FALSE, (float *)nmodel);
-    glUniform4f(glGetUniformLocation(shader_prog, "uCol"), color[0], color[1], color[2], color[3]);
-    glUniform3f(glGetUniformLocation(shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
-    if (mode == SOLID)
-    {
-        glDisable(GL_BLEND);
-        glDisable(GL_CULL_FACE);
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-    }
 
-    if (mode == FLUID)
-    {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
-    }
-    glBindVertexArray(o->VAO);
-    glDrawElements(GL_TRIANGLES, o->i_num, GL_UNSIGNED_INT, 0);
-}
-*/
 void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog, vec3 ldir, mat4 proj_view)
 {
     mat4 model, tmp, mvp;
     mat3 norm_model;
+    vec3 pos = {0};
+    pos[0] = satelite->dist;
     glm_mat4_identity(model);
     glm_rotate(model, satelite->ang, satelite->orb_axis);
-    satelite->pos[0] = satelite->dist;
-    glm_translate(model, satelite->pos);
+    glm_translate(model, pos);
     glm_scale_uni(model, satelite->rad);
     glm_mat4_mul(proj_view, model, mvp);
     glm_mat4_inv(model, tmp);
@@ -470,16 +429,16 @@ void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog
     // glDisable(GL_POLYGON_OFFSET_FILL);
 }
 
-void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 ang_xy)
+void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 eye_ang)
 {
     memcpy(eye, eye0, sizeof(vec3));
     memcpy(up, up0, sizeof(vec3));
 
-    glm_vec3_rotate(eye, ang_xy[0], (vec3){1.0f, 0.0f, 0.0f});
-    glm_vec3_rotate(up, ang_xy[0], (vec3){1.0f, 0.0f, 0.0f});
+    glm_vec3_rotate(eye, eye_ang[0], (vec3){1.0f, 0.0f, 0.0f});
+    glm_vec3_rotate(up, eye_ang[0], (vec3){1.0f, 0.0f, 0.0f});
 
-    glm_vec3_rotate(eye, ang_xy[1], (vec3){0.0f, 1.0f, 0.0f});
-    glm_vec3_rotate(up, ang_xy[1], (vec3){0.0f, 1.0f, 0.0f});
+    glm_vec3_rotate(eye, eye_ang[1], (vec3){0.0f, 1.0f, 0.0f});
+    glm_vec3_rotate(up, eye_ang[1], (vec3){0.0f, 1.0f, 0.0f});
 }
 
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
@@ -550,41 +509,44 @@ void cleanup(GLuint VAO, GLuint VBO, GLuint EBO)
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
 }
-/*
-void printInfoTab(SateliteInfo *sinfo, OceanInfo *oinfo)
+
+void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet)
 {
     static const char sep[] = "////////////////////////////////////////////";
-    static const char ts[] = "Satelite\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
-    static const char to[] = "Ocean\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
-    static char buf[2048];
+    static const char satelite_title[] = "Satelite\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
+    static const char ocean_title[] = "Ocean\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
+    static const char planet_title[] = "Planet\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
+    static char buf[3072];
     int len = 0;
 
-    len += snprintf(buf + len, sizeof(buf) - len, "\033[14A\033[J");
+    len += snprintf(buf + len, sizeof(buf) - len, "\033[16A\033[J");
 
     len += snprintf(buf + len, sizeof(buf) - len,
                     "\033[93m%s\033[0m\n"
-                    "position: (%f;%f;%f)\n"
-                    "distance: %f\n"
-                    "angle: %f\n"
-                    "angular velocity: %f\n"
+                    "distance: %lf m\n"
+                    "angle: %lf rad\n"
+                    "angular velocity: %lf rad/s\n"
                     "\033[93m%s\033[0m\n\n",
-                    ts,
-                    sinfo->pos[0], sinfo->pos[1], sinfo->pos[2],
-                    sinfo->d, sinfo->ang, sinfo->ang_v, sep);
+                    satelite_title,
+                    satelite->dist * Rscale, satelite->ang, satelite->ang_vel, sep);
 
     len += snprintf(buf + len, sizeof(buf) - len,
                     "\033[96m%s\033[0m\n"
-                    "Hmax: %f\n"
-                    "Hmax-pos: (%f;%f;%f)\n"
-                    "Hmin: %f\n"
-                    "Hmin-pos: (%f;%f;%f)\n"
+                    "Hmax: %lf m\n"
+                    "Hmin: %lf m\n"
                     "friction: %s\n"
-                    "\033[96m%s\033[0m\n",
-                    to, oinfo->hmax, oinfo->hmax_pos[0], oinfo->hmax_pos[1], oinfo->hmax_pos[2],
-                    oinfo->hmin, oinfo->hmin_pos[0], oinfo->hmin_pos[1], oinfo->hmin_pos[2],
-                    oinfo->friction ? "ON" : "OFF", sep);
+                    "\033[96m%s\033[0m\n\n",
+                    ocean_title, ocean->h_max,
+                    ocean->h_min,
+                    ocean->friction ? "ON" : "OFF", sep);
+
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "\033[95m%s\033[0m\n"
+                    "radius: %lf m\n"
+                    "g: %lf N/kg\n"
+                    "\033[95m%s\033[0m\n",
+                    planet_title, planet->rad * Rscale, planet->mass * G * Ascale / planet->rad / planet->rad, sep);
 
     fwrite(buf, 1, len, stdout);
     fflush(stdout);
 }
-*/
