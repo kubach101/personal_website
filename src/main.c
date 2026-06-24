@@ -101,9 +101,9 @@ void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog
 
 int main()
 {
-    unsigned int Tscale;
-    unsigned int OceanScale;
-    unsigned int TideScale;
+    unsigned int Tscale = 10000;
+    unsigned int OceanScale = 200;
+    unsigned int TideScale = 10000;
 
     Shape sphere = {0};
     sphere.res = 64;
@@ -124,7 +124,7 @@ int main()
     ocean.shape.indices = malloc(i_size);
     CreateSphere(&ocean.shape);
 
-    char ans;
+    char ans = '\0';
     printf("Set custom paramters(y/n):");
     scanf("%c", &ans);
     printf("\033[1A\033[J");
@@ -142,13 +142,14 @@ int main()
         printf("Input satelite radius(e22 m):");
         scanf("%f", &planet.rad);
         printf("\033[1A\033[J");
-        printf("Input satelite radius(m):");
-        scanf("%f", &planet.rad);
+        printf("Input ocean base height(m):");
+        scanf("%f", &ocean.base_h);
         printf("\033[1A\033[J");
     }
+    ans = '\0';
     printf("Set custom scaling(y/n):");
+    scanf(" %c", &ans);
     printf("\033[1A\033[J");
-    scanf("%c", &ans);
     if (ans == 'y' || ans == 'Y')
     {
         printf("Input time acceleration:");
@@ -247,7 +248,7 @@ int main()
 
         glfwSwapBuffers(window);
 
-        time += dt;
+        time += dt / Tunit;
         printInfoTab(&satelite, &ocean, &planet, time);
 
         glfwPollEvents();
