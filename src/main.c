@@ -9,14 +9,15 @@
 #include <string.h>
 #include <float.h>
 
-#define Tscale 1.0E3
-#define Mscale 1.0E22
-#define Rscale 1.0E8
-#define Ascale (Rscale / Tscale / Tscale)
-#define Fscale (Mscale * Ascale)
-#define G (6.67E-11 * Mscale * Tscale * Tscale / (Rscale * Rscale * Rscale))
-#define TideAccel 500
-#define TimeAccel 100000000
+#define Tunit 100
+#define Munit 1.0E22
+#define Runit 1.0E8
+#define Aunit (Runit / Tunit / Tunit)
+#define G (6.67E-11 * Munit * Tunit * Tunit / (Runit * Runit * Runit))
+#define AVunit 1.0E-6
+#define TideScale 1.0E4
+#define Tscale 1.0E6
+#define OceanScale 100
 
 const char *vert =
     "#version 330 core\n"
@@ -55,26 +56,10 @@ typedef struct
     int res;
     GLuint VAO, VBO, EBO;
 } Shape;
-/*
+
 typedef struct
 {
-    GLuint VAO, VBO, EBO;
-    GLfloat *vertices;
-    GLuint *indices;
-    unsigned int v_num, i_num;
-    int stacks, slices;
-    GLuint shader_prog;
-    float mass, r;
-    vec3 pos0, pos;
-    mat4 mvp;
-    mat3 nmodel;
-    vec4 col;
-    int mode;
-} Obj;
-*/
-typedef struct
-{
-    double mass, dist, rad, ang, ang_vel;
+    float mass, dist, rad, ang, ang_vel;
     vec3 orb_axis;
     vec4 color;
     Shape *shape;
@@ -82,14 +67,14 @@ typedef struct
 
 typedef struct
 {
-    double rad, base_h, h_max, h_min, friction, deviation;
+    float rad, base_h, h_max, h_min, friction, deviation;
     vec4 color;
     Shape shape;
 } Ocean;
 
 typedef struct
 {
-    double mass, rad;
+    float mass, rad;
     Shape *shape;
     vec4 color;
 } Planet;
@@ -110,11 +95,11 @@ void sendData(Shape *s, GLenum usage);
 void resendData(Shape *s);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
-void DrawSphere(Shape *Shape);
+void CreateSphere(Shape *Shape);
 void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet);
 void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up);
 void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 eye_ang);
-void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet);
+void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet, float time);
 void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog, vec3 ldir, mat4 proj_view);
 
 int main()
@@ -123,7 +108,7 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    GLFWwindow *window = glfwCreateWindow(800, 800, "my app", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(800, 800, "Tidal Simulation by Kuba Chmura", NULL, NULL);
     if (window == NULL)
     {
         printf("Error creating a window\n");
@@ -147,23 +132,24 @@ int main()
     size_t i_size = sizeof(GLuint) * sphere.res * sphere.res * 2 * 6;
     sphere.vertices = malloc(v_size);
     sphere.indices = malloc(i_size);
-    DrawSphere(&sphere);
+    CreateSphere(&sphere);
     glGenVertexArrays(1, &sphere.VAO);
     glGenBuffers(1, &sphere.VBO);
     glGenBuffers(1, &sphere.EBO);
-
     sendData(&sphere, GL_STATIC_DRAW);
+
     GLuint shader_prog = createShaderProgram(vert, frag);
 
-    Satelite satelite = {7.35f, 3.85f, 0.17374f, 0.0f, 0.0f, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.333f, 1.0f}, &sphere};
-    Planet planet = {597.2f, 0.6378f, &sphere, {1.0f, 0.0f, 0.0f, 1.0f}};
-    Ocean ocean = {planet.rad + 0.035f, 0.035f, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
-    ocean.shape.res = 86;
+    Satelite satelite = {7.35f, 3.85f, 0.017374f, 0.0f, 0.0f, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.333f, 1.0f}, &sphere};
+    Planet planet = {597.2f, 0.06378f, &sphere, {1.0f, 0.0f, 0.0f, 1.0f}};
+    Ocean ocean = {planet.rad, 3700.0f / Runit, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
+    ocean.rad += ocean.base_h;
+    ocean.shape.res = 64;
     v_size = sizeof(GLfloat) * (ocean.shape.res + 1) * (2 * ocean.shape.res + 1) * 3;
     i_size = sizeof(GLuint) * ocean.shape.res * ocean.shape.res * 2 * 6;
     ocean.shape.vertices = malloc(v_size);
     ocean.shape.indices = malloc(i_size);
-    DrawSphere(&ocean.shape);
+    CreateSphere(&ocean.shape);
     glGenVertexArrays(1, &ocean.shape.VAO);
     glGenBuffers(1, &ocean.shape.VBO);
     glGenBuffers(1, &ocean.shape.EBO);
@@ -183,10 +169,13 @@ int main()
     vec2 eye_ang = {0};
     vec3 eye, up;
     UpdateProjView(proj_view, 1.0f, eye0, up0);
-    vec3 ldir = {1.0f, 0.0f, -1.0f};
+
+    vec3 ldir = {1.0f, 1.0f, 0.0f};
     glm_normalize(ldir);
+
     glfwSetTime(0);
-    double dt = 0.0f;
+    float dt = 0.0f;
+    float time = 0.0f;
     while (!glfwWindowShouldClose(window))
     {
         dt = glfwGetTime();
@@ -200,8 +189,8 @@ int main()
             ShapeWaterLayer(&ocean, &satelite, &planet);
             resendData(&ocean.shape);
         }
-        satelite.ang_vel = sqrt(G * (planet.mass) / satelite.dist / satelite.dist / satelite.dist) / Tscale;
-        satelite.ang += satelite.ang_vel * dt * TimeAccel / Tscale;
+        satelite.ang_vel = 1 / AVunit * sqrt(G * planet.mass / satelite.dist / satelite.dist / satelite.dist);
+        satelite.ang += satelite.ang_vel * dt * Tscale * AVunit;
         satelite.ang = fmod(satelite.ang, 2 * M_PI);
         if (update_vision)
         {
@@ -219,7 +208,9 @@ int main()
 
         glfwSwapBuffers(window);
 
-        printInfoTab(&satelite, &ocean, &planet);
+        time += dt;
+        printInfoTab(&satelite, &ocean, &planet, time);
+        // printf("dt = %f, time = %f\n", dt, time);
 
         glfwPollEvents();
 
@@ -272,7 +263,7 @@ int main()
     return 0;
 }
 
-void DrawSphere(Shape *s)
+void CreateSphere(Shape *s)
 {
 
     int idx = 0;
@@ -336,9 +327,9 @@ void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet)
             float theta = (float)j * 2.0f * M_PI / ocean->shape.res / 2;
             vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
             glm_normalize(normal);
-            double cos_gamma = glm_dot(fdir, normal);
-            double tide = 1.5f * satelite->mass / planet->mass * planet->rad * planet->rad * planet->rad * planet->rad / satelite->dist / satelite->dist / satelite->dist * (3 * cos_gamma * cos_gamma - 1);
-            double h = ocean->base_h + tide;
+            float cos_gamma = glm_dot(fdir, normal);
+            float tide = 0.5f * satelite->mass / planet->mass * planet->rad * planet->rad * planet->rad * planet->rad / satelite->dist / satelite->dist / satelite->dist * (3 * cos_gamma * cos_gamma - 1);
+            float h = ocean->base_h + tide;
             if (h > ocean->h_max)
             {
                 ocean->h_max = h;
@@ -347,13 +338,14 @@ void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet)
             {
                 ocean->h_min = h;
             }
-            ocean->shape.vertices[vidx++] = normal[0] * (planet->rad + ocean->base_h + tide * TideAccel);
-            ocean->shape.vertices[vidx++] = normal[1] * (planet->rad + ocean->base_h + tide * TideAccel);
-            ocean->shape.vertices[vidx++] = normal[2] * (planet->rad + ocean->base_h + tide * TideAccel);
+            float render_h = ocean->base_h * OceanScale + (tide * TideScale * OceanScale);
+            ocean->shape.vertices[vidx++] = normal[0] * (planet->rad + render_h);
+            ocean->shape.vertices[vidx++] = normal[1] * (planet->rad + render_h);
+            ocean->shape.vertices[vidx++] = normal[2] * (planet->rad + render_h);
         }
     }
-    ocean->h_max *= Rscale;
-    ocean->h_min *= Rscale;
+    ocean->h_max *= Runit;
+    ocean->h_min *= Runit;
 }
 
 void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up)
@@ -392,8 +384,8 @@ void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog
     glBindVertexArray(satelite->shape->VAO);
     glDrawElements(GL_TRIANGLES, satelite->shape->res * 2 * satelite->shape->res * 6, GL_UNSIGNED_INT, 0);
 
-    mat4 ident;
-    glm_mat4_identity(ident);
+    mat3 ident;
+    glm_mat3_identity(ident);
 
     glm_mat4_identity(model);
     glm_scale_uni(model, planet->rad);
@@ -510,7 +502,7 @@ void cleanup(GLuint VAO, GLuint VBO, GLuint EBO)
     glDeleteBuffers(1, &EBO);
 }
 
-void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet)
+void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet, float time)
 {
     static const char sep[] = "////////////////////////////////////////////";
     static const char satelite_title[] = "Satelite\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
@@ -519,21 +511,21 @@ void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet)
     static char buf[3072];
     int len = 0;
 
-    len += snprintf(buf + len, sizeof(buf) - len, "\033[16A\033[J");
+    len += snprintf(buf + len, sizeof(buf) - len, "\033[20A\033[J");
 
     len += snprintf(buf + len, sizeof(buf) - len,
                     "\033[93m%s\033[0m\n"
-                    "distance: %lf m\n"
-                    "angle: %lf rad\n"
-                    "angular velocity: %lf rad/s\n"
+                    "distance: %fe8 m\n"
+                    "angle: %f rad\n"
+                    "angular velocity: %.4fe-6 rad/s\n"
                     "\033[93m%s\033[0m\n\n",
                     satelite_title,
-                    satelite->dist * Rscale, satelite->ang, satelite->ang_vel, sep);
+                    satelite->dist, satelite->ang, satelite->ang_vel, sep);
 
     len += snprintf(buf + len, sizeof(buf) - len,
                     "\033[96m%s\033[0m\n"
-                    "Hmax: %lf m\n"
-                    "Hmin: %lf m\n"
+                    "Hmax: %.2f m\n"
+                    "Hmin: %.2f m\n"
                     "friction: %s\n"
                     "\033[96m%s\033[0m\n\n",
                     ocean_title, ocean->h_max,
@@ -542,11 +534,12 @@ void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet)
 
     len += snprintf(buf + len, sizeof(buf) - len,
                     "\033[95m%s\033[0m\n"
-                    "radius: %lf m\n"
-                    "g: %lf N/kg\n"
+                    "radius: %fe8 m\n"
+                    "g: %f N/kg\n"
                     "\033[95m%s\033[0m\n",
-                    planet_title, planet->rad * Rscale, planet->mass * G * Ascale / planet->rad / planet->rad, sep);
+                    planet_title, planet->rad, planet->mass * G * Aunit / planet->rad / planet->rad, sep);
 
+    len += snprintf(buf + len, sizeof(buf) - len, "\nTime passed: %fe6 s\n", time);
     fwrite(buf, 1, len, stdout);
     fflush(stdout);
 }
