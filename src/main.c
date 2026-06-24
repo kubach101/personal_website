@@ -15,9 +15,6 @@
 #define Aunit (Runit / Tunit / Tunit)
 #define G (6.67E-11 * Munit * Tunit * Tunit / (Runit * Runit * Runit))
 #define AVunit 1.0E-6
-#define TideScale 1.0E4
-#define Tscale 1.0E6
-#define OceanScale 100
 
 const char *vert =
     "#version 330 core\n"
@@ -96,7 +93,7 @@ void resendData(Shape *s);
 void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
 void CreateSphere(Shape *Shape);
-void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet);
+void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet, unsigned int OceanScale, unsigned int TideScale);
 void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up);
 void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 eye_ang);
 void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet, float time);
@@ -104,6 +101,67 @@ void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog
 
 int main()
 {
+    unsigned int Tscale;
+    unsigned int OceanScale;
+    unsigned int TideScale;
+
+    Shape sphere = {0};
+    sphere.res = 64;
+    size_t v_size = sizeof(GLfloat) * (sphere.res + 1) * (2 * sphere.res + 1) * 3;
+    size_t i_size = sizeof(GLuint) * sphere.res * sphere.res * 2 * 6;
+    sphere.vertices = malloc(v_size);
+    sphere.indices = malloc(i_size);
+    CreateSphere(&sphere);
+
+    Satelite satelite = {7.35f, 3.85f, 0.017374f, 0.0f, 0.0f, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.333f, 1.0f}, &sphere};
+    Planet planet = {597.2f, 0.06378f, &sphere, {1.0f, 0.0f, 0.0f, 1.0f}};
+    Ocean ocean = {planet.rad, 3700.0f / Runit, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
+    ocean.rad += ocean.base_h;
+    ocean.shape.res = 64;
+    v_size = sizeof(GLfloat) * (ocean.shape.res + 1) * (2 * ocean.shape.res + 1) * 3;
+    i_size = sizeof(GLuint) * ocean.shape.res * ocean.shape.res * 2 * 6;
+    ocean.shape.vertices = malloc(v_size);
+    ocean.shape.indices = malloc(i_size);
+    CreateSphere(&ocean.shape);
+
+    char ans;
+    printf("Set custom paramters(y/n):");
+    scanf("%c", &ans);
+    printf("\033[1A\033[J");
+    if (ans == 'y' || ans == 'Y')
+    {
+        printf("Input planet mass(e8 kg):");
+        scanf("%f", &planet.mass);
+        printf("\033[1A\033[J");
+        printf("Input satelite mass(e8 kg):");
+        scanf("%f", &satelite.mass);
+        printf("\033[1A\033[J");
+        printf("Input planet radius(e22 m):");
+        scanf("%f", &planet.rad);
+        printf("\033[1A\033[J");
+        printf("Input satelite radius(e22 m):");
+        scanf("%f", &planet.rad);
+        printf("\033[1A\033[J");
+        printf("Input satelite radius(m):");
+        scanf("%f", &planet.rad);
+        printf("\033[1A\033[J");
+    }
+    printf("Set custom scaling(y/n):");
+    printf("\033[1A\033[J");
+    scanf("%c", &ans);
+    if (ans == 'y' || ans == 'Y')
+    {
+        printf("Input time acceleration:");
+        scanf("%u", &Tscale);
+        printf("\033[1A\033[J");
+        printf("Input rendered ocean scale:");
+        scanf("%u", &OceanScale);
+        printf("\033[1A\033[J");
+        printf("Input visual tide scale:");
+        scanf("%u", &TideScale);
+        printf("\033[1A\033[J");
+    }
+
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -125,43 +183,24 @@ int main()
     glEnable(GL_DEPTH_TEST);
     // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glfwSwapBuffers(window);
 
-    Shape sphere = {0};
-    sphere.res = 64;
-    size_t v_size = sizeof(GLfloat) * (sphere.res + 1) * (2 * sphere.res + 1) * 3;
-    size_t i_size = sizeof(GLuint) * sphere.res * sphere.res * 2 * 6;
-    sphere.vertices = malloc(v_size);
-    sphere.indices = malloc(i_size);
-    CreateSphere(&sphere);
     glGenVertexArrays(1, &sphere.VAO);
     glGenBuffers(1, &sphere.VBO);
     glGenBuffers(1, &sphere.EBO);
     sendData(&sphere, GL_STATIC_DRAW);
 
-    GLuint shader_prog = createShaderProgram(vert, frag);
-
-    Satelite satelite = {7.35f, 3.85f, 0.017374f, 0.0f, 0.0f, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.333f, 1.0f}, &sphere};
-    Planet planet = {597.2f, 0.06378f, &sphere, {1.0f, 0.0f, 0.0f, 1.0f}};
-    Ocean ocean = {planet.rad, 3700.0f / Runit, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
-    ocean.rad += ocean.base_h;
-    ocean.shape.res = 64;
-    v_size = sizeof(GLfloat) * (ocean.shape.res + 1) * (2 * ocean.shape.res + 1) * 3;
-    i_size = sizeof(GLuint) * ocean.shape.res * ocean.shape.res * 2 * 6;
-    ocean.shape.vertices = malloc(v_size);
-    ocean.shape.indices = malloc(i_size);
-    CreateSphere(&ocean.shape);
     glGenVertexArrays(1, &ocean.shape.VAO);
     glGenBuffers(1, &ocean.shape.VBO);
     glGenBuffers(1, &ocean.shape.EBO);
     sendData(&ocean.shape, GL_DYNAMIC_DRAW);
 
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glfwSwapBuffers(window);
+    GLuint shader_prog = createShaderProgram(vert, frag);
 
     bool reshape = true;
     bool update_vision = false;
-    // float acc_time = 0.0f;
 
     mat4 proj_view;
     vec3 eye0 = {0.0f, 0.0f, 15.0f};
@@ -186,16 +225,16 @@ int main()
 
         if (reshape)
         {
-            ShapeWaterLayer(&ocean, &satelite, &planet);
+            ShapeWaterLayer(&ocean, &satelite, &planet, OceanScale, TideScale);
             resendData(&ocean.shape);
         }
-        satelite.ang_vel = 1 / AVunit * sqrt(G * planet.mass / satelite.dist / satelite.dist / satelite.dist);
+        satelite.ang_vel = 1 / AVunit * sqrt(G * planet.mass / satelite.dist / satelite.dist / satelite.dist) / Tunit;
         satelite.ang += satelite.ang_vel * dt * Tscale * AVunit;
         satelite.ang = fmod(satelite.ang, 2 * M_PI);
+
         if (update_vision)
         {
 
-            // Creating MVP's and normal matrices:       {
             eye_ang[0] = fmod(eye_ang[0], 2 * M_PI);
             eye_ang[1] = fmod(eye_ang[1], 2 * M_PI);
 
@@ -210,44 +249,37 @@ int main()
 
         time += dt;
         printInfoTab(&satelite, &ocean, &planet, time);
-        // printf("dt = %f, time = %f\n", dt, time);
 
         glfwPollEvents();
 
         if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS)
         {
             eye0[2] -= 0.005f;
-            // printf("recived: M\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS)
         {
             eye0[2] += 0.005f;
-            // printf("recived: N\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
         {
             eye_ang[1] -= 0.3f / 180.0f * M_PI;
-            // printf("recived: arrowR\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
         {
             eye_ang[1] += 0.3f / 180.0f * M_PI;
-            // printf("recived: arrowL\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
         {
             eye_ang[0] -= 0.3f / 180.0f * M_PI;
-            // printf("recived: arrowU\n");
             update_vision = true;
         }
         if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
         {
             eye_ang[0] += 0.3f / 180.0f * M_PI;
-            // printf("recived: arrowD\n");
             update_vision = true;
         }
     }
@@ -309,7 +341,7 @@ void CreateSphere(Shape *s)
     }
 }
 
-void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet)
+void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet, unsigned int OceanScale, unsigned int TideScale)
 {
     int vidx = 0;
     vec3 fdir = {0};
@@ -515,7 +547,7 @@ void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet, float time)
 
     len += snprintf(buf + len, sizeof(buf) - len,
                     "\033[93m%s\033[0m\n"
-                    "distance: %fe8 m\n"
+                    "distance: %.2fe8 m\n"
                     "angle: %f rad\n"
                     "angular velocity: %.4fe-6 rad/s\n"
                     "\033[93m%s\033[0m\n\n",
