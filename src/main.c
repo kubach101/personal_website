@@ -140,11 +140,13 @@ int main()
         scanf("%f", &planet.rad);
         printf("\033[1A\033[J");
         printf("Input satelite radius(e22 m):");
-        scanf("%f", &planet.rad);
+        scanf("%f", &satelite.rad);
         printf("\033[1A\033[J");
         printf("Input ocean base height(m):");
         scanf("%f", &ocean.base_h);
         printf("\033[1A\033[J");
+        ocean.base_h /= Runit;
+        ocean.rad = planet.rad + ocean.base_h;
     }
     ans = '\0';
     printf("Set custom scaling(y/n):");
@@ -162,6 +164,10 @@ int main()
         scanf("%u", &TideScale);
         printf("\033[1A\033[J");
     }
+
+    printf("base_h = %f\n", ocean.base_h);
+    printf("plant: rad = %f, mass = %f\n", planet.rad, planet.mass);
+    printf("satelite: rad = %f, mass = %f\n", satelite.rad, satelite.mass);
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -249,7 +255,7 @@ int main()
         glfwSwapBuffers(window);
 
         time += dt / Tunit;
-        printInfoTab(&satelite, &ocean, &planet, time);
+        // printInfoTab(&satelite, &ocean, &planet, time);
 
         glfwPollEvents();
 
