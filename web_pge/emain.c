@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <float.h>
+#include <emscripten.h>
 
 #define Tunit 100
 #define Munit 1.0E22
@@ -17,7 +18,7 @@
 #define AVunit 1.0E-6
 
 const char *vert =
-    "#version 330 core\n"
+    "#version 330 es\n"
     "layout (location = 0) in vec3 aPos;\n"
     "uniform mat4 uMVP;\n"
     "uniform mat3 uNormMat;\n"
@@ -29,7 +30,7 @@ const char *vert =
     "}\n";
 
 const char *frag =
-    "#version 330 core\n"
+    "#version 330 es\n"
     "out vec4 fragCol;\n"
     "in vec3 normal;\n"
     "uniform vec4 uCol;\n"
@@ -64,7 +65,7 @@ typedef struct
 
 typedef struct
 {
-    float rad, base_h, h_max, h_min, deviation;
+    float rad, base_h, h_max, h_min, friction, deviation;
     vec4 color;
     Shape shape;
 } Ocean;
@@ -90,12 +91,21 @@ void CreateSphere(Shape *Shape);
 void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet, unsigned int OceanScale, unsigned int TideScale);
 void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up);
 void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 eye_ang);
-void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet, float time);
 void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog, vec3 ldir, mat4 proj_view);
 
+GLFWwindow *window;
+
+void main_loop()
+{
+    render();
+    glfwSwapBuffers(window);
+    glfwPollEvents();
+}
 int main()
 {
-    unsigned int Tscale = 100000;
+    init();
+    emsripten_set_main_loop(main_loop, 0, 1);
+    unsigned int Tscale = 10000;
     unsigned int OceanScale = 200;
     unsigned int TideScale = 10000;
 
@@ -109,7 +119,7 @@ int main()
 
     Satelite satelite = {7.35f, 3.85f, 0.017374f, 0.0f, 0.0f, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.333f, 1.0f}, &sphere};
     Planet planet = {597.2f, 0.06378f, &sphere, {1.0f, 0.0f, 0.0f, 1.0f}};
-    Ocean ocean = {planet.rad, 3700.0f / Runit, 0.0f, 0.0f, M_PI / 6, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
+    Ocean ocean = {planet.rad, 3700.0f / Runit, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
     ocean.rad += ocean.base_h;
     ocean.shape.res = 64;
     v_size = sizeof(GLfloat) * (ocean.shape.res + 1) * (2 * ocean.shape.res + 1) * 3;
@@ -124,9 +134,6 @@ int main()
     printf("\033[1A\033[J");
     if (ans == 'y' || ans == 'Y')
     {
-        printf("Input satelite distance(e22 m):");
-        scanf("%f", &satelite.dist);
-        printf("\033[1A\033[J");
         printf("Input planet mass(e8 kg):");
         scanf("%f", &planet.mass);
         printf("\033[1A\033[J");
@@ -142,11 +149,8 @@ int main()
         printf("Input ocean base height(m):");
         scanf("%f", &ocean.base_h);
         printf("\033[1A\033[J");
-        printf("Input the oceans deviation(deg):");
-        scanf("%f", &ocean.deviation);
         ocean.base_h /= Runit;
         ocean.rad = planet.rad + ocean.base_h;
-        ocean.deviation *= M_PI / 180;
     }
     ans = '\0';
     printf("Set custom scaling(y/n):");
@@ -165,15 +169,15 @@ int main()
         printf("\033[1A\033[J");
     }
 
-    // printf("base_h = %f\n", ocean.base_h);
-    // printf("plant: rad = %f, mass = %f\n", planet.rad, planet.mass);
-    // printf("satelite: rad = %f, mass = %f\n", satelite.rad, satelite.mass);
+    printf("base_h = %f\n", ocean.base_h);
+    printf("plant: rad = %f, mass = %f\n", planet.rad, planet.mass);
+    printf("satelite: rad = %f, mass = %f\n", satelite.rad, satelite.mass);
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    GLFWwindow *window = glfwCreateWindow(800, 800, "Tidal Simulation by Kuba Chmura", NULL, NULL);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+    window = glfwCreateWindow(800, 800, "Tidal Simulation by Kuba Chmura", NULL, NULL);
     if (window == NULL)
     {
         printf("Error creating a window\n");
@@ -255,7 +259,6 @@ int main()
         glfwSwapBuffers(window);
 
         time += dt / Tunit;
-        printInfoTab(&satelite, &ocean, &planet, time);
 
         glfwPollEvents();
 
@@ -354,7 +357,7 @@ void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet, unsigned 
     vec3 fdir = {0};
     fdir[0] = -satelite->dist;
     glm_normalize(fdir);
-    glm_vec3_rotate(fdir, satelite->ang - ocean->deviation, satelite->orb_axis);
+    glm_vec3_rotate(fdir, satelite->ang, satelite->orb_axis);
 
     ocean->h_min = FLT_MAX;
     ocean->h_max = -FLT_MAX;
@@ -539,46 +542,4 @@ void cleanup(GLuint VAO, GLuint VBO, GLuint EBO)
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
-}
-
-void printInfoTab(Satelite *satelite, Ocean *ocean, Planet *planet, float time)
-{
-    static const char sep[] = "////////////////////////////////////////////";
-    static const char satelite_title[] = "Satelite\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
-    static const char ocean_title[] = "Ocean\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
-    static const char planet_title[] = "Planet\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";
-    static char buf[3072];
-    int len = 0;
-
-    len += snprintf(buf + len, sizeof(buf) - len, "\033[20A\033[J");
-
-    len += snprintf(buf + len, sizeof(buf) - len,
-                    "\033[93m%s\033[0m\n"
-                    "distance: %.2fe8 m\n"
-                    "angle: %f rad\n"
-                    "angular velocity: %.4fe-6 rad/s\n"
-                    "\033[93m%s\033[0m\n\n",
-                    satelite_title,
-                    satelite->dist, satelite->ang, satelite->ang_vel, sep);
-
-    len += snprintf(buf + len, sizeof(buf) - len,
-                    "\033[96m%s\033[0m\n"
-                    "Hmax: %.2f m\n"
-                    "Hmin: %.2f m\n"
-                    "deviation: %f rad\n"
-                    "\033[96m%s\033[0m\n\n",
-                    ocean_title, ocean->h_max,
-                    ocean->h_min,
-                    ocean->deviation, sep);
-
-    len += snprintf(buf + len, sizeof(buf) - len,
-                    "\033[95m%s\033[0m\n"
-                    "radius: %fe8 m\n"
-                    "g: %f N/kg\n"
-                    "\033[95m%s\033[0m\n",
-                    planet_title, planet->rad, planet->mass * G * Aunit / planet->rad / planet->rad, sep);
-
-    len += snprintf(buf + len, sizeof(buf) - len, "\nTime passed: %fe6 s\n", time);
-    fwrite(buf, 1, len, stdout);
-    fflush(stdout);
 }
