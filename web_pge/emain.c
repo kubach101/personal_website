@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+#include <GLES3/gl3.h>
 #include <stdio.h>
 #include <GLFW/glfw3.h>
 #include <cglm/cglm.h>
@@ -8,7 +8,6 @@
 #include <stdbool.h>
 #include <string.h>
 #include <float.h>
-#include <emscripten.h>
 
 #define Tunit 100
 #define Munit 1.0E22
@@ -17,397 +16,169 @@
 #define G (6.67E-11 * Munit * Tunit * Tunit / (Runit * Runit * Runit))
 #define AVunit 1.0E-6
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
+typedef struct
+{
+    GLuint VAO, VBO, EBO;
+    GLfloat *vertices;
+    GLuint *indices;
+    int v_num, i_num;
+} Geometry;
+
 const char *vert =
-    "#version 330 es\n"
+    "#version 300 es\n"
     "layout (location = 0) in vec3 aPos;\n"
+    "layout (location = 1) in vec3 aNorm;\n"
+    "out vec3 normal;\n"
+    "out vec4 color;\n"
     "uniform mat4 uMVP;\n"
     "uniform mat3 uNormMat;\n"
-    "out vec3 normal;\n"
-    "void main()\n"
-    "{\n"
+    "void main(){\n"
     "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
-    "    normal = normalize(uNormMat * aPos);\n"
+    "    normal = normalize(uNormMat * aNorm);\n"
     "}\n";
 
 const char *frag =
-    "#version 330 es\n"
-    "out vec4 fragCol;\n"
+    "#version 300 es\n"
+    "precision mediump float;\n"
     "in vec3 normal;\n"
+    "out vec4 fragCol;\n"
     "uniform vec4 uCol;\n"
-    "uniform vec3 uLDir;\n"
-    "void main()\n"
-    "{\n"
-    "    float diff = max(dot(normal, -uLDir), 0.0);\n"
-    "    fragCol = uCol;\n"
-    "    for(int i =0; i < 3; i++){\n"
-    "        float minCol = fragCol[i]*0.3;\n"
-    "        fragCol[i] = fragCol[i]*0.7;\n"
-    "        fragCol[i] *= diff;\n"
-    "        fragCol[i] += minCol;\n"
-    "     }\n"
+    "uniform vec3 uLdir;\n"
+    "void main(){\n"
+    "    float diff = max(dot(normal, uLdir), 0.7);\n"
+    "    fragCol = uCol*diff;\n"
+    "}\n";
+const char *vert2 =
+    "#version 300 es\n"
+    "layout (location = 0) in vec3 aPos;\n"
+    "layout (location = 1) in vec4 aCol;\n"
+    "out vec4 color;\n"
+    "uniform mat4 uMVP;"
+    "void main(){\n"
+    "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
+    "    color = aCol;\n"
     "}\n";
 
-typedef struct
-{
-    GLfloat *vertices;
-    GLuint *indices;
-    int res;
-    GLuint VAO, VBO, EBO;
-} Shape;
-
-typedef struct
-{
-    float mass, dist, rad, ang, ang_vel;
-    vec3 orb_axis;
-    vec4 color;
-    Shape *shape;
-} Satelite;
-
-typedef struct
-{
-    float rad, base_h, h_max, h_min, friction, deviation;
-    vec4 color;
-    Shape shape;
-} Ocean;
-
-typedef struct
-{
-    float mass, rad;
-    Shape *shape;
-    vec4 color;
-} Planet;
-
-enum RenderType
-{
-    SOLID = 0,
-    FLUID = 1
-};
-
-void sendData(Shape *s, GLenum usage);
-void resendData(Shape *s);
-void cleanup(GLuint VAO, GLuint VBO, GLuint EBO);
+const char *frag2 =
+    "#version 300 es\n"
+    "precision mediump float;\n"
+    "in vec4 color;\n"
+    "out vec4 fragCol;\n"
+    "void main(){\n"
+    "    fragCol = color;\n"
+    "}\n";
+void CreateSphere(GLfloat *vertices, GLuint *indices, int stacks, int slices);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
-void CreateSphere(Shape *Shape);
-void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet, unsigned int OceanScale, unsigned int TideScale);
-void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up);
-void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 eye_ang);
-void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog, vec3 ldir, mat4 proj_view);
 
-GLFWwindow *window;
+GLFWwindow *window = NULL;
+Geometry sphere = {0};
+Geometry ocean = {0};
+Geometry axis = {0};
+GLuint shader_prog, shader_prog2;
 
-void main_loop()
+unsigned int Tscale = 100000;
+unsigned int OceanScale = 200;
+unsigned int TideScale = 10000;
+
+float planet_mass = 597.2f;
+float planet_rad = 0.06378f;
+float satelite_mass = 7.35f;
+float satelite_rad = 0.017374f;
+float distance = 3.85f;
+float base_h;
+
+vec3 orb_axis = {0.0f, 1.0f, 0.0f};
+float orb_ang = 0.0f;
+float deviation;
+
+vec3 ldir = {0.0f, 0.0f, -1.0f};
+float eye_ang[2] = {0.0f};
+float eye_rad = 12.5f;
+bool update_vision = true;
+mat4 view, proj, proj_view;
+mat4 axis_proj, axis_view, axis_proj_view;
+float dt = 0.0f;
+int ocean_stacks = 42;
+int ocean_slices = 84;
+
+float zoom_speed = 2.5f;
+float rotate_speed = 25.0f * M_PI / 180.0f;
+
+void main_loop(void)
 {
-    render();
-    glfwSwapBuffers(window);
-    glfwPollEvents();
-}
-int main()
-{
-    init();
-    emsripten_set_main_loop(main_loop, 0, 1);
-    unsigned int Tscale = 10000;
-    unsigned int OceanScale = 200;
-    unsigned int TideScale = 10000;
-
-    Shape sphere = {0};
-    sphere.res = 64;
-    size_t v_size = sizeof(GLfloat) * (sphere.res + 1) * (2 * sphere.res + 1) * 3;
-    size_t i_size = sizeof(GLuint) * sphere.res * sphere.res * 2 * 6;
-    sphere.vertices = malloc(v_size);
-    sphere.indices = malloc(i_size);
-    CreateSphere(&sphere);
-
-    Satelite satelite = {7.35f, 3.85f, 0.017374f, 0.0f, 0.0f, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.333f, 1.0f}, &sphere};
-    Planet planet = {597.2f, 0.06378f, &sphere, {1.0f, 0.0f, 0.0f, 1.0f}};
-    Ocean ocean = {planet.rad, 3700.0f / Runit, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 1.0f, 0.5f}, {0}};
-    ocean.rad += ocean.base_h;
-    ocean.shape.res = 64;
-    v_size = sizeof(GLfloat) * (ocean.shape.res + 1) * (2 * ocean.shape.res + 1) * 3;
-    i_size = sizeof(GLuint) * ocean.shape.res * ocean.shape.res * 2 * 6;
-    ocean.shape.vertices = malloc(v_size);
-    ocean.shape.indices = malloc(i_size);
-    CreateSphere(&ocean.shape);
-
-    char ans = '\0';
-    printf("Set custom paramters(y/n):");
-    scanf("%c", &ans);
-    printf("\033[1A\033[J");
-    if (ans == 'y' || ans == 'Y')
-    {
-        printf("Input planet mass(e8 kg):");
-        scanf("%f", &planet.mass);
-        printf("\033[1A\033[J");
-        printf("Input satelite mass(e8 kg):");
-        scanf("%f", &satelite.mass);
-        printf("\033[1A\033[J");
-        printf("Input planet radius(e22 m):");
-        scanf("%f", &planet.rad);
-        printf("\033[1A\033[J");
-        printf("Input satelite radius(e22 m):");
-        scanf("%f", &satelite.rad);
-        printf("\033[1A\033[J");
-        printf("Input ocean base height(m):");
-        scanf("%f", &ocean.base_h);
-        printf("\033[1A\033[J");
-        ocean.base_h /= Runit;
-        ocean.rad = planet.rad + ocean.base_h;
-    }
-    ans = '\0';
-    printf("Set custom scaling(y/n):");
-    scanf(" %c", &ans);
-    printf("\033[1A\033[J");
-    if (ans == 'y' || ans == 'Y')
-    {
-        printf("Input time acceleration:");
-        scanf("%u", &Tscale);
-        printf("\033[1A\033[J");
-        printf("Input rendered ocean scale:");
-        scanf("%u", &OceanScale);
-        printf("\033[1A\033[J");
-        printf("Input visual tide scale:");
-        scanf("%u", &TideScale);
-        printf("\033[1A\033[J");
-    }
-
-    printf("base_h = %f\n", ocean.base_h);
-    printf("plant: rad = %f, mass = %f\n", planet.rad, planet.mass);
-    printf("satelite: rad = %f, mass = %f\n", satelite.rad, satelite.mass);
-
-    glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
-    window = glfwCreateWindow(800, 800, "Tidal Simulation by Kuba Chmura", NULL, NULL);
-    if (window == NULL)
-    {
-        printf("Error creating a window\n");
-        glfwTerminate();
-        return -1;
-    }
-    glfwMakeContextCurrent(window);
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
-    {
-        printf("Failed to initialize GLAD\n");
-        return -1;
-    }
-    glViewport(0, 0, 800, 800);
-    glEnable(GL_DEPTH_TEST);
-    // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glfwSwapBuffers(window);
-
-    glGenVertexArrays(1, &sphere.VAO);
-    glGenBuffers(1, &sphere.VBO);
-    glGenBuffers(1, &sphere.EBO);
-    sendData(&sphere, GL_STATIC_DRAW);
-
-    glGenVertexArrays(1, &ocean.shape.VAO);
-    glGenBuffers(1, &ocean.shape.VBO);
-    glGenBuffers(1, &ocean.shape.EBO);
-    sendData(&ocean.shape, GL_DYNAMIC_DRAW);
-
-    GLuint shader_prog = createShaderProgram(vert, frag);
-
-    bool reshape = true;
-    bool update_vision = false;
-
-    mat4 proj_view;
-    vec3 eye0 = {0.0f, 0.0f, 15.0f};
-    vec3 up0 = {0.0f, 1.0f, 0.0f};
-    vec2 eye_ang = {0};
-    vec3 eye, up;
-    UpdateProjView(proj_view, 1.0f, eye0, up0);
-
-    vec3 ldir = {1.0f, 1.0f, 0.0f};
-    glm_normalize(ldir);
-
+    dt = glfwGetTime();
     glfwSetTime(0);
-    float dt = 0.0f;
-    float time = 0.0f;
-    while (!glfwWindowShouldClose(window))
-    {
-        dt = glfwGetTime();
-        glfwSetTime(0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    float tide_const = 0.5f * satelite_mass / planet_mass * planet_rad * planet_rad * planet_rad * planet_rad / distance / distance / distance;
+    float ang_vel = 1 / AVunit * sqrt(G * planet_mass / distance / distance / distance) / Tunit;
+    orb_ang += ang_vel * dt * Tscale * AVunit;
+    // orb_ang -= deviation;
+    orb_ang = fmod(orb_ang, 2 * M_PI);
+    vec3 fdir = {1.0f, 0.0f, 0.0f};
+    glm_vec3_rotate(fdir, orb_ang, orb_axis);
 
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        if (reshape)
-        {
-            ShapeWaterLayer(&ocean, &satelite, &planet, OceanScale, TideScale);
-            resendData(&ocean.shape);
-        }
-        satelite.ang_vel = 1 / AVunit * sqrt(G * planet.mass / satelite.dist / satelite.dist / satelite.dist) / Tunit;
-        satelite.ang += satelite.ang_vel * dt * Tscale * AVunit;
-        satelite.ang = fmod(satelite.ang, 2 * M_PI);
-
-        if (update_vision)
-        {
-
-            eye_ang[0] = fmod(eye_ang[0], 2 * M_PI);
-            eye_ang[1] = fmod(eye_ang[1], 2 * M_PI);
-
-            RotateEye(eye, up, eye0, up0, eye_ang);
-            UpdateProjView(proj_view, 1.0f, eye, up);
-            update_vision = false;
-        }
-
-        Render(&satelite, &ocean, &planet, shader_prog, ldir, proj_view);
-
-        glfwSwapBuffers(window);
-
-        time += dt / Tunit;
-
-        glfwPollEvents();
-
-        if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS)
-        {
-            eye0[2] -= 0.005f;
-            update_vision = true;
-        }
-        if (glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS)
-        {
-            eye0[2] += 0.005f;
-            update_vision = true;
-        }
-        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
-        {
-            eye_ang[1] -= 0.3f / 180.0f * M_PI;
-            update_vision = true;
-        }
-        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
-        {
-            eye_ang[1] += 0.3f / 180.0f * M_PI;
-            update_vision = true;
-        }
-        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
-        {
-            eye_ang[0] -= 0.3f / 180.0f * M_PI;
-            update_vision = true;
-        }
-        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
-        {
-            eye_ang[0] += 0.3f / 180.0f * M_PI;
-            update_vision = true;
-        }
-    }
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    free(sphere.vertices);
-    free(sphere.indices);
-
-    free(ocean.shape.vertices);
-    free(ocean.shape.indices);
-
-    return 0;
-}
-
-void CreateSphere(Shape *s)
-{
-
-    int idx = 0;
-    int iidx = 0;
-    int stacks = s->res;
-    int slices = 2 * s->res;
-    for (int i = 0; i <= stacks; i++)
-    {
-        float phi = (float)i * M_PI / stacks;
-        float sp = sin(phi);
-        float cp = cos(phi);
-        for (int j = 0; j <= slices; j++)
-        {
-            float theta = (float)j * 2 * M_PI / slices;
-            float st = sin(theta);
-            float ct = cos(theta);
-            s->vertices[idx] = sp * ct;
-            idx++;
-            s->vertices[idx] = cp;
-            idx++;
-            s->vertices[idx] = sp * st;
-            idx++;
-        }
-    }
-
-    for (int i = 0; i < stacks; i++)
-    {
-        for (int j = 0; j < slices; j++)
-        {
-            int a = i * (slices + 1) + j;
-            int b = i * (slices + 1) + j + 1;
-            int c = (i + 1) * (slices + 1) + j;
-            int d = (i + 1) * (slices + 1) + j + 1;
-
-            s->indices[iidx++] = a;
-            s->indices[iidx++] = b;
-            s->indices[iidx++] = c;
-
-            s->indices[iidx++] = b;
-            s->indices[iidx++] = d;
-            s->indices[iidx++] = c;
-        }
-    }
-}
-
-void ShapeWaterLayer(Ocean *ocean, Satelite *satelite, Planet *planet, unsigned int OceanScale, unsigned int TideScale)
-{
+    // water layer shaping:
     int vidx = 0;
-    vec3 fdir = {0};
-    fdir[0] = -satelite->dist;
-    glm_normalize(fdir);
-    glm_vec3_rotate(fdir, satelite->ang, satelite->orb_axis);
-
-    ocean->h_min = FLT_MAX;
-    ocean->h_max = -FLT_MAX;
-    for (int i = 0; i <= ocean->shape.res; i++)
+    for (int i = 0; i <= ocean_stacks; i++)
     {
-        float phi = (float)i * M_PI / ocean->shape.res;
-        for (int j = 0; j <= ocean->shape.res * 2; j++)
+        float phi = (float)i * M_PI / ocean_stacks;
+        for (int j = 0; j <= ocean_slices; j++)
         {
-            float theta = (float)j * 2.0f * M_PI / ocean->shape.res / 2;
+            float theta = (float)j * 2.0f * M_PI / ocean_slices;
             vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
             glm_normalize(normal);
             float cos_gamma = glm_dot(fdir, normal);
-            float tide = 0.5f * satelite->mass / planet->mass * planet->rad * planet->rad * planet->rad * planet->rad / satelite->dist / satelite->dist / satelite->dist * (3 * cos_gamma * cos_gamma - 1);
-            float h = ocean->base_h + tide;
-            if (h > ocean->h_max)
-            {
-                ocean->h_max = h;
-            }
-            if (h < ocean->h_min)
-            {
-                ocean->h_min = h;
-            }
-            float render_h = ocean->base_h * OceanScale + (tide * TideScale * OceanScale);
-            ocean->shape.vertices[vidx++] = normal[0] * (planet->rad + render_h);
-            ocean->shape.vertices[vidx++] = normal[1] * (planet->rad + render_h);
-            ocean->shape.vertices[vidx++] = normal[2] * (planet->rad + render_h);
+            float tide = tide_const * (3 * cos_gamma * cos_gamma - 1);
+            float render_h = base_h * OceanScale + (tide * TideScale * OceanScale);
+            ocean.vertices[vidx++] = normal[0] * (planet_rad + render_h);
+            ocean.vertices[vidx++] = normal[1] * (planet_rad + render_h);
+            ocean.vertices[vidx++] = normal[2] * (planet_rad + render_h);
+            ocean.vertices[vidx++] = normal[0];
+            ocean.vertices[vidx++] = normal[1];
+            ocean.vertices[vidx++] = normal[2];
         }
     }
-    ocean->h_max *= Runit;
-    ocean->h_min *= Runit;
-}
+    // resending data:
+    glBindBuffer(GL_ARRAY_BUFFER, ocean.VBO);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, ocean.v_num * 6 * sizeof(GLfloat), ocean.vertices);
 
-void UpdateProjView(mat4 proj_view, float aspect, vec3 eye, vec3 up)
-{
-    mat4 view, proj;
-    glm_perspective(glm_rad(45.0f), 800.0f / 800.0f, 0.1f, 25.0f, proj);
-    glm_lookat(eye, (vec3){0.0f, 0.0f, 0.0f}, up, view);
-    glm_mat4_mul(proj, view, proj_view);
-}
+    if (update_vision)
+    {
+        vec3 eye = {0.0f, 0.0f, eye_rad};
+        vec3 axis_eye = {0.0f, 0.0f, 2.0f};
+        glm_vec3_rotate(eye, eye_ang[0], (vec3){1.0f, 0.0f, 0.0f});
+        glm_vec3_rotate(eye, eye_ang[1], (vec3){0.0f, 1.0f, 0.0f});
+        glm_vec3_rotate(axis_eye, eye_ang[0], (vec3){1.0f, 0.0f, 0.0f});
+        glm_vec3_rotate(axis_eye, eye_ang[1], (vec3){0.0f, 1.0f, 0.0f});
+        vec3 up = {0.0f, 1.0f, 0.0f};
+        glm_vec3_rotate(up, eye_ang[0], (vec3){1.0f, 0.0f, 0.0f});
+        glm_vec3_rotate(up, eye_ang[1], (vec3){0.0f, 1.0f, 0.0f});
+        glm_perspective(glm_rad(45.0f), 800.0f / 800.0f, 0.1f, 30.0f, proj);
+        glm_lookat(eye, (vec3){0.0f, 0.0f, 0.0f}, up, view);
+        glm_mat4_mul(proj, view, proj_view);
+        glm_perspective(glm_rad(45.0f), 120.0f / 120.0f, 0.05f, 5.0f, axis_proj);
+        glm_lookat(axis_eye, (vec3){0.0f, 0.0f, 0.0f}, up, axis_view);
+        glm_mat4_mul(axis_proj, axis_view, axis_proj_view);
 
-void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog, vec3 ldir, mat4 proj_view)
-{
-    mat4 model, tmp, mvp;
+        update_vision = false;
+    }
+    // rendering:
+
+    glViewport(0, 0, 800, 800);
+    // satelite:
+    mat4 model,
+        tmp, mvp;
     mat3 norm_model;
     vec3 pos = {0};
-    pos[0] = satelite->dist;
+    pos[0] = distance;
     glm_mat4_identity(model);
-    glm_rotate(model, satelite->ang, satelite->orb_axis);
+    glm_rotate(model, orb_ang, orb_axis);
     glm_translate(model, pos);
-    glm_scale_uni(model, satelite->rad);
+    glm_scale_uni(model, satelite_rad);
     glm_mat4_mul(proj_view, model, mvp);
     glm_mat4_inv(model, tmp);
     glm_mat4_transpose(tmp);
@@ -421,29 +192,27 @@ void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog
     glUseProgram(shader_prog);
     glUniformMatrix4fv(glGetUniformLocation(shader_prog, "uMVP"), 1, GL_FALSE, (float *)mvp);
     glUniformMatrix3fv(glGetUniformLocation(shader_prog, "uNormMat"), 1, GL_FALSE, (float *)norm_model);
-    glUniform4f(glGetUniformLocation(shader_prog, "uCol"), satelite->color[0], satelite->color[1], satelite->color[2], satelite->color[3]);
+    glUniform4f(glGetUniformLocation(shader_prog, "uCol"), 0.0f, 1.0f, 0.0f, 1.0f);
     glUniform3f(glGetUniformLocation(shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
-    glBindVertexArray(satelite->shape->VAO);
-    glDrawElements(GL_TRIANGLES, satelite->shape->res * 2 * satelite->shape->res * 6, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(sphere.VAO);
+    glDrawElements(GL_TRIANGLES, sphere.i_num, GL_UNSIGNED_INT, 0);
 
+    // core:
     mat3 ident;
     glm_mat3_identity(ident);
 
     glm_mat4_identity(model);
-    glm_scale_uni(model, planet->rad);
+    glm_scale_uni(model, planet_rad);
     glm_mat4_mul(proj_view, model, mvp);
     glUseProgram(shader_prog);
     glUniformMatrix4fv(glGetUniformLocation(shader_prog, "uMVP"), 1, GL_FALSE, (float *)mvp);
     glUniformMatrix3fv(glGetUniformLocation(shader_prog, "uNormMat"), 1, GL_FALSE, (float *)ident);
-    glUniform4f(glGetUniformLocation(shader_prog, "uCol"), planet->color[0], planet->color[1], planet->color[2], planet->color[3]);
+    glUniform4f(glGetUniformLocation(shader_prog, "uCol"), 1.0f, 0.0f, 0.0f, 1.0f);
     glUniform3f(glGetUniformLocation(shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
-    glBindVertexArray(planet->shape->VAO);
-    glDrawElements(GL_TRIANGLES, planet->shape->res * 2 * planet->shape->res * 6, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(sphere.VAO);
+    glDrawElements(GL_TRIANGLES, sphere.i_num, GL_UNSIGNED_INT, 0);
 
-    glm_mat4_identity(model);
-    // glm_scale_uni(model, ocean->rad);
-    glm_mat4_mul(proj_view, model, mvp);
-
+    // ocean:
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_DEPTH_TEST);
@@ -451,30 +220,235 @@ void Render(Satelite *satelite, Ocean *ocean, Planet *planet, GLuint shader_prog
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
-    // glEnable(GL_POLYGON_OFFSET_FILL);
-    // glPolygonOffset(-1.0f, -1.0f);
+    glm_mat4_identity(model);
+    glm_mat4_mul(proj_view, model, mvp);
     glUseProgram(shader_prog);
     glUniformMatrix4fv(glGetUniformLocation(shader_prog, "uMVP"), 1, GL_FALSE, (float *)mvp);
     glUniformMatrix3fv(glGetUniformLocation(shader_prog, "uNormMat"), 1, GL_FALSE, (float *)ident);
-    glUniform4f(glGetUniformLocation(shader_prog, "uCol"), ocean->color[0], ocean->color[1], ocean->color[2], ocean->color[3]);
+    glUniform4f(glGetUniformLocation(shader_prog, "uCol"), 0.0f, 0.0f, 1.0f, 0.5f);
     glUniform3f(glGetUniformLocation(shader_prog, "uLDir"), ldir[0], ldir[1], ldir[2]);
-    glBindVertexArray(ocean->shape.VAO);
-    glDrawElements(GL_TRIANGLES, ocean->shape.res * 2 * ocean->shape.res * 6, GL_UNSIGNED_INT, 0);
-    // glDisable(GL_POLYGON_OFFSET_FILL);
+    glBindVertexArray(ocean.VAO);
+    glDrawElements(GL_TRIANGLES, ocean.i_num, GL_UNSIGNED_INT, 0);
+
+    // axis:
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glViewport(600, 600, 200, 200);
+    glm_mat4_identity(model);
+    glm_scale_uni(model, 0.5f);
+    glm_mat4_mul(axis_proj_view, model, mvp);
+    glUseProgram(shader_prog2);
+    glUniformMatrix4fv(glGetUniformLocation(shader_prog2, "uMVP"), 1, GL_FALSE, (float *)mvp);
+    glBindVertexArray(axis.VAO);
+    glDrawElements(GL_LINES, axis.i_num, GL_UNSIGNED_INT, 0);
+    glfwSwapBuffers(window);
+    glfwPollEvents();
+    if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS)
+    {
+        eye_rad -= zoom_speed * dt;
+        update_vision = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS)
+    {
+        eye_rad += zoom_speed * dt;
+        update_vision = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+    {
+        eye_ang[1] -= rotate_speed * dt;
+        update_vision = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+    {
+        eye_ang[1] += rotate_speed * dt;
+        update_vision = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+    {
+        eye_ang[0] -= rotate_speed * dt;
+        update_vision = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+    {
+        eye_ang[0] += rotate_speed * dt;
+        update_vision = true;
+    }
 }
 
-void RotateEye(vec3 eye, vec3 up, vec3 eye0, vec3 up0, vec2 eye_ang)
+int main()
 {
-    memcpy(eye, eye0, sizeof(vec3));
-    memcpy(up, up0, sizeof(vec3));
+    sphere.v_num = (32 + 1) * (64 + 1);
+    sphere.i_num = 32 * 64 * 6;
+    sphere.vertices = malloc(sizeof(GLfloat) * sphere.v_num * 10);
+    sphere.indices = malloc(sizeof(GLuint) * sphere.i_num);
+    CreateSphere(sphere.vertices, sphere.indices, 32, 64);
 
-    glm_vec3_rotate(eye, eye_ang[0], (vec3){1.0f, 0.0f, 0.0f});
-    glm_vec3_rotate(up, eye_ang[0], (vec3){1.0f, 0.0f, 0.0f});
+    ocean.v_num = (42 + 1) * (84 + 1);
+    ocean.i_num = 42 * 84 * 6;
+    ocean.vertices = malloc(sizeof(GLfloat) * ocean.v_num * 10);
+    ocean.indices = malloc(sizeof(GLuint) * ocean.i_num);
+    CreateSphere(ocean.vertices, ocean.indices, 42, 84);
 
-    glm_vec3_rotate(eye, eye_ang[1], (vec3){0.0f, 1.0f, 0.0f});
-    glm_vec3_rotate(up, eye_ang[1], (vec3){0.0f, 1.0f, 0.0f});
+    GLfloat axis_vertices[] = {
+        // Z axis:
+        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+        // X axis:
+        1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+        // Y axis:
+        0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f};
+
+    GLuint axis_indices[] = {0, 1, 2, 3, 4, 5};
+
+    axis.vertices = axis_vertices;
+    axis.indices = axis_indices;
+    axis.v_num = 6;
+    axis.i_num = 6;
+
+    base_h = 3700.0f / Runit;
+    deviation = 15.0f / 180.0f * M_PI;
+
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    window = glfwCreateWindow(800, 800, "Tidal Simulation by Kuba Chmura", NULL, NULL);
+    if (window == NULL)
+    {
+        printf("Error creating a window\n");
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    glViewport(0, 0, 800, 800);
+    glEnable(GL_DEPTH_TEST);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glfwSwapBuffers(window);
+
+    shader_prog = createShaderProgram(vert, frag);
+    shader_prog2 = createShaderProgram(vert2, frag2);
+
+    glGenVertexArrays(1, &sphere.VAO);
+    glGenBuffers(1, &sphere.VBO);
+    glGenBuffers(1, &sphere.EBO);
+
+    glGenVertexArrays(1, &ocean.VAO);
+    glGenBuffers(1, &ocean.VBO);
+    glGenBuffers(1, &ocean.EBO);
+
+    glGenVertexArrays(1, &axis.VAO);
+    glGenBuffers(1, &axis.VBO);
+    glGenBuffers(1, &axis.EBO);
+
+    // sphere:
+    glBindVertexArray(sphere.VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, sphere.VBO);
+    glBufferData(GL_ARRAY_BUFFER, sphere.v_num * 6 * sizeof(GLfloat), sphere.vertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void *)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void *)(3 * sizeof(GLfloat)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphere.EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphere.i_num * sizeof(GLuint), sphere.indices, GL_STATIC_DRAW);
+    glBindVertexArray(0);
+
+    // ocean:
+    glBindVertexArray(ocean.VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, ocean.VBO);
+    glBufferData(GL_ARRAY_BUFFER, ocean.v_num * 6 * sizeof(GLfloat), ocean.vertices, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void *)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void *)(3 * sizeof(GLfloat)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ocean.EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, ocean.i_num * sizeof(GLuint), ocean.indices, GL_DYNAMIC_DRAW);
+    glBindVertexArray(0);
+
+    // axis:
+    glBindVertexArray(axis.VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, axis.VBO);
+    glBufferData(GL_ARRAY_BUFFER, axis.v_num * 7 * sizeof(GLfloat), axis.vertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(GLfloat), (void *)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(GLfloat), (void *)(3 * sizeof(GLfloat)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, axis.EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, axis.i_num * sizeof(GLuint), axis.indices, GL_STATIC_DRAW);
+    glBindVertexArray(0);
+
+    glm_vec3_normalize(ldir);
+
+    glfwSetTime(0);
+
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(main_loop, 0, 1);
+#else
+    while (!glfwWindowShouldClose(window))
+        main_loop();
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    free(sphere.vertices);
+    free(sphere.indices);
+    free(ocean.vertices);
+    free(ocean.indices);
+#endif
+    return 0;
 }
+void CreateSphere(GLfloat *vertices, GLuint *indices, int stacks, int slices)
+{
 
+    int idx = 0;
+    int iidx = 0;
+    for (int i = 0; i <= stacks; i++)
+    {
+        float phi = (float)i * M_PI / stacks;
+        float sp = sin(phi);
+        float cp = cos(phi);
+        for (int j = 0; j <= slices; j++)
+        {
+            float theta = (float)j * 2 * M_PI / slices;
+            float st = sin(theta);
+            float ct = cos(theta);
+
+            vertices[idx] = sp * ct;
+            vertices[idx + 3] = vertices[idx];
+            idx++;
+            vertices[idx] = cp;
+            vertices[idx + 3] = vertices[idx];
+            idx++;
+            vertices[idx] = sp * st;
+            vertices[idx + 3] = vertices[idx];
+            idx++;
+
+            idx += 3;
+        }
+    }
+
+    for (int i = 0; i < stacks; i++)
+    {
+        for (int j = 0; j < slices; j++)
+        {
+            int a = i * (slices + 1) + j;
+            int b = i * (slices + 1) + j + 1;
+            int c = (i + 1) * (slices + 1) + j;
+            int d = (i + 1) * (slices + 1) + j + 1;
+
+            indices[iidx++] = a;
+            indices[iidx++] = b;
+            indices[iidx++] = c;
+
+            indices[iidx++] = b;
+            indices[iidx++] = d;
+            indices[iidx++] = c;
+        }
+    }
+}
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
 {
     GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
@@ -492,54 +466,30 @@ GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentS
     GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragment_shader, 1, &fragmentShaderSource, NULL);
     glCompileShader(fragment_shader);
-
-    GLint frag_succes;
-    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &frag_succes);
-    if (!vert_success)
+    GLint frag_success;
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &frag_success);
+    if (!frag_success)
     {
         char log[512];
-        glGetShaderInfoLog(vertex_shader, 512, NULL, log);
-        printf("VERT ERROR: %s\n", log);
+        glGetShaderInfoLog(fragment_shader, 512, NULL, log);
+        printf("FRAG ERROR: %s\n", log);
     }
 
     GLuint shader_program = glCreateProgram();
     glAttachShader(shader_program, vertex_shader);
     glAttachShader(shader_program, fragment_shader);
     glLinkProgram(shader_program);
+
+    GLint link_success;
+    glGetProgramiv(shader_program, GL_LINK_STATUS, &link_success);
+    if (!link_success)
+    {
+        char log[512];
+        glGetProgramInfoLog(shader_program, 512, NULL, log);
+        printf("LINK ERROR: %s\n", log);
+    }
+
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
-
     return shader_program;
-}
-
-void sendData(Shape *s, GLenum usage)
-{
-    size_t v_size = sizeof(GLfloat) * (s->res + 1) * (2 * s->res + 1) * 3;
-    size_t i_size = sizeof(GLuint) * s->res * s->res * 2 * 6;
-    glBindVertexArray(s->VAO);
-
-    glBindBuffer(GL_ARRAY_BUFFER, s->VBO);
-    glBufferData(GL_ARRAY_BUFFER, v_size, s->vertices, usage);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void *)0);
-    glEnableVertexAttribArray(0);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, i_size, s->indices, usage);
-
-    glBindVertexArray(0);
-}
-void resendData(Shape *s)
-{
-
-    glBindBuffer(GL_ARRAY_BUFFER, s->VBO);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * (s->res + 1) * (2 * s->res + 1) * 3, s->vertices);
-
-    glBindVertexArray(0);
-}
-
-void cleanup(GLuint VAO, GLuint VBO, GLuint EBO)
-{
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
-    glDeleteBuffers(1, &EBO);
 }
