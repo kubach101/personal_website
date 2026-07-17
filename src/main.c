@@ -85,7 +85,12 @@ const char *AxisFragmentShader =
     "}\n";
 
 void CreateSphere(GLfloat *vertices, GLuint *indices, int stacks, int slices);
+void CreateTrail(GLfloat *vertices, GLuint *indices, float end_angle, int resolution, vec3 color);
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
+void KeyboardButtonCallback(GLFWwindow *window, int key, int scancode, int action, int mods);
+
+bool hide_fdir = true;
+bool update_fdir_visibility = true;
 int main()
 {
     unsigned int Tscale = 100000;
@@ -97,6 +102,7 @@ int main()
     Geometry sphere = {0};
     Geometry ocean = {0};
     Geometry axis = {0};
+    Geometry trail = {0};
 
     sphere.v_num = (32 + 1) * (64 + 1);
     sphere.i_num = 32 * 64 * 6;
@@ -129,6 +135,12 @@ int main()
     axis.indices = axis_indices;
     axis.v_num = 6;
     axis.i_num = 6;
+
+    trail.v_num = 15 + 2;
+    trail.i_num = trail.v_num;
+    trail.vertices = malloc(sizeof(GLfloat) * trail.v_num * 7);
+    trail.indices = malloc(sizeof(GLfloat) * trail.i_num * 7);
+    CreateTrail(trail.vertices, trail.indices, 55.0f * M_PI / 180.0f, 15, (vec3){1.0f, 1.0f, 1.0f});
 
     float planet_mass = 597.2f;
     float planet_rad = 0.6378f;
@@ -199,6 +211,7 @@ int main()
         return -1;
     }
     glfwMakeContextCurrent(window);
+    glfwSetKeyCallback(window, KeyboardButtonCallback);
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     {
         printf("Failed to initialize GLAD\n");
@@ -216,6 +229,21 @@ int main()
     GLuint DefaultProgram = createShaderProgram(DefaultVertexShader, DefaultFragmentShader);
     GLuint AxisProgram = createShaderProgram(AxisVertexShader, AxisFragmentShader);
 
+    GLuint OPuMVPLoc = glGetUniformLocation(OceanProgram, "uMVP");
+    GLuint OPuNormMatLoc = glGetUniformLocation(OceanProgram, "uNormMat");
+    GLuint OPuTideConstLoc = glGetUniformLocation(OceanProgram, "uTideConst");
+    GLuint OPuFDirLoc = glGetUniformLocation(OceanProgram, "uFDir");
+    GLuint OPuRadiusLoc = glGetUniformLocation(OceanProgram, "uRadius");
+    GLuint OPuColLoc = glGetUniformLocation(OceanProgram, "uCol");
+    GLuint OPuLDirLoc = glGetUniformLocation(OceanProgram, "uLDir");
+
+    GLuint DPuMVPLoc = glGetUniformLocation(DefaultProgram, "uMVP");
+    GLuint DPuNormMatLoc = glGetUniformLocation(DefaultProgram, "uNormMat");
+    GLuint DPuColLoc = glGetUniformLocation(DefaultProgram, "uCol");
+    GLuint DPuLDirLoc = glGetUniformLocation(DefaultProgram, "uLDir");
+
+    GLuint APuMVPLoc = glGetUniformLocation(AxisProgram, "uMVP");
+
     glGenVertexArrays(1, &sphere.VAO);
     glGenBuffers(1, &sphere.VBO);
     glGenBuffers(1, &sphere.EBO);
@@ -227,6 +255,10 @@ int main()
     glGenVertexArrays(1, &axis.VAO);
     glGenBuffers(1, &axis.VBO);
     glGenBuffers(1, &axis.EBO);
+
+    glGenVertexArrays(1, &trail.VAO);
+    glGenBuffers(1, &trail.VBO);
+    glGenBuffers(1, &trail.EBO);
 
     // sphere:
     glBindVertexArray(sphere.VAO);
@@ -264,6 +296,18 @@ int main()
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, axis.i_num * sizeof(GLuint), axis.indices, GL_STATIC_DRAW);
     glBindVertexArray(0);
 
+    // trail:
+    glBindVertexArray(trail.VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, trail.VBO);
+    glBufferData(GL_ARRAY_BUFFER, trail.v_num * 7 * sizeof(GLfloat), trail.vertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(GLfloat), (void *)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(GLfloat), (void *)(3 * sizeof(GLfloat)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, trail.EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, trail.i_num * sizeof(GLuint), trail.indices, GL_STATIC_DRAW);
+    glBindVertexArray(0);
+
     vec3 ldir = {-1.0f, -1.0f, -1.0f};
     glm_vec3_normalize(ldir);
 
@@ -284,40 +328,10 @@ int main()
         float tide_const = TideScale * 0.5f * satelite_mass / planet_mass * planet_rad * planet_rad * planet_rad * planet_rad / distance / distance / distance;
         float ang_vel = 1 / AVunit * sqrt(G * planet_mass / distance / distance / distance) / Tunit;
         orb_ang += ang_vel * dt * Tscale * AVunit;
-        // orb_ang -= deviation;
         orb_ang = fmod(orb_ang, 2 * M_PI);
         vec3 fdir = {1.0f, 0.0f, 0.0f};
-        glm_vec3_rotate(fdir, orb_ang, orb_axis);
+        glm_vec3_rotate(fdir, orb_ang - deviation, orb_axis);
 
-        // water layer shaping:
-        /*
-        int vidx = 0;
-        for (int i = 0; i <= ocean_stacks; i++)
-        {
-            float phi = (float)i * M_PI / ocean_stacks;
-            for (int j = 0; j <= ocean_slices; j++)
-            {
-                float theta = (float)j * 2.0f * M_PI / ocean_slices;
-                vec3 normal = {sinf(phi) * cosf(theta), cosf(phi), sinf(phi) * sinf(theta)};
-                glm_normalize(normal);
-                float cos_gamma = glm_dot(fdir, normal);
-                float tide = tide_const * (3 * cos_gamma * cos_gamma - 1);
-                float render_h = base_h * OceanScale + (tide * TideScale * OceanScale);
-                ocean.vertices[vidx++] = normal[0] * (planet_rad + render_h);
-                ocean.vertices[vidx++] = normal[1] * (planet_rad + render_h);
-                ocean.vertices[vidx++] = normal[2] * (planet_rad + render_h);
-                ocean.vertices[vidx++] = normal[0];
-                ocean.vertices[vidx++] = normal[1];
-                ocean.vertices[vidx++] = normal[2];
-            }
-        }
-
-
-        // resending data:
-        glBindBuffer(GL_ARRAY_BUFFER, ocean.VBO);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, ocean.v_num * 6 * sizeof(GLfloat), ocean.vertices);
-        */
-        // printf("%f\n", tide_const);
         if (update_vision)
         {
             vec3 eye = {0.0f, 0.0f, eye_rad};
@@ -337,6 +351,22 @@ int main()
             glm_mat4_mul(axis_proj, axis_view, axis_proj_view);
 
             update_vision = false;
+        }
+        if (update_fdir_visibility)
+        {
+            if (hide_fdir)
+            {
+                trail.vertices[6] = 0.0f;
+                trail.vertices[13] = 0.0f;
+            }
+            else
+            {
+                trail.vertices[6] = 1.0f;
+                trail.vertices[13] = 1.0f;
+            }
+            glBindBuffer(GL_ARRAY_BUFFER, trail.VBO);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, trail.v_num * 7 * sizeof(GLfloat), trail.vertices);
+            update_fdir_visibility = false;
         }
 
         // rendering:
@@ -362,10 +392,10 @@ int main()
         glDepthMask(GL_TRUE);
 
         glUseProgram(DefaultProgram);
-        glUniformMatrix4fv(glGetUniformLocation(DefaultProgram, "uMVP"), 1, GL_FALSE, (float *)mvp);
-        glUniformMatrix3fv(glGetUniformLocation(DefaultProgram, "uNormMat"), 1, GL_FALSE, (float *)norm_model);
-        glUniform4f(glGetUniformLocation(DefaultProgram, "uCol"), 0.0f, 1.0f, 0.0f, 1.0f);
-        glUniform3f(glGetUniformLocation(DefaultProgram, "uLDir"), ldir[0], ldir[1], ldir[2]);
+        glUniformMatrix4fv(DPuMVPLoc, 1, GL_FALSE, (float *)mvp);
+        glUniformMatrix3fv(DPuNormMatLoc, 1, GL_FALSE, (float *)norm_model);
+        glUniform4f(DPuColLoc, 0.0f, 1.0f, 0.0f, 1.0f);
+        glUniform3f(DPuLDirLoc, ldir[0], ldir[1], ldir[2]);
         glBindVertexArray(sphere.VAO);
         glDrawElements(GL_TRIANGLES, sphere.i_num, GL_UNSIGNED_INT, 0);
 
@@ -376,30 +406,41 @@ int main()
         glm_scale_uni(model, planet_rad);
         glm_mat4_mul(proj_view, model, mvp);
         glUseProgram(DefaultProgram);
-        glUniformMatrix4fv(glGetUniformLocation(DefaultProgram, "uMVP"), 1, GL_FALSE, (float *)mvp);
-        glUniformMatrix3fv(glGetUniformLocation(DefaultProgram, "uNormMat"), 1, GL_FALSE, (float *)ident);
-        glUniform4f(glGetUniformLocation(DefaultProgram, "uCol"), 1.0f, 0.0f, 0.0f, 1.0f);
-        glUniform3f(glGetUniformLocation(DefaultProgram, "uLDir"), ldir[0], ldir[1], ldir[2]);
+        glUniformMatrix4fv(DPuMVPLoc, 1, GL_FALSE, (float *)mvp);
+        glUniformMatrix3fv(DPuNormMatLoc, 1, GL_FALSE, (float *)ident);
+        glUniform4f(DPuColLoc, 1.0f, 0.0f, 0.0f, 1.0f);
+        glUniform3f(DPuLDirLoc, ldir[0], ldir[1], ldir[2]);
         glBindVertexArray(sphere.VAO);
         glDrawElements(GL_TRIANGLES, sphere.i_num, GL_UNSIGNED_INT, 0);
 
-        // ocean:
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
+
+        // trail:
+        glm_mat4_identity(model);
+        glm_rotate(model, orb_ang, orb_axis);
+        glm_scale_uni(model, distance);
+        glm_mat4_mul(proj_view, model, mvp);
+        glUseProgram(AxisProgram);
+        glUniformMatrix4fv(APuMVPLoc, 1, GL_FALSE, (float *)mvp);
+        glBindVertexArray(trail.VAO);
+        glDrawElements(GL_LINE_STRIP, trail.i_num, GL_UNSIGNED_INT, 0);
+
+        // ocean:
         glm_mat4_identity(model);
         glm_mat4_mul(proj_view, model, mvp);
         glUseProgram(OceanProgram);
-        glUniformMatrix4fv(glGetUniformLocation(OceanProgram, "uMVP"), 1, GL_FALSE, (float *)mvp);
-        glUniformMatrix3fv(glGetUniformLocation(OceanProgram, "uNormMat"), 1, GL_FALSE, (float *)ident);
-        glUniform1f(glGetUniformLocation(OceanProgram, "uTideConst"), tide_const);
-        glUniform3f(glGetUniformLocation(OceanProgram, "uFDir"), fdir[0], fdir[1], fdir[2]);
-        glUniform1f(glGetUniformLocation(OceanProgram, "uRadius"), planet_rad + base_h);
-        glUniform4f(glGetUniformLocation(OceanProgram, "uCol"), 0.0f, 0.0f, 1.0f, 0.5f);
-        glUniform3f(glGetUniformLocation(OceanProgram, "uLDir"), ldir[0], ldir[1], ldir[2]);
+        glUniformMatrix4fv(OPuMVPLoc, 1, GL_FALSE, (float *)mvp);
+        glUniformMatrix3fv(OPuNormMatLoc, 1, GL_FALSE, (float *)ident);
+        glUniform1f(OPuTideConstLoc, tide_const);
+        glUniform3f(OPuFDirLoc, fdir[0], fdir[1], fdir[2]);
+        glUniform1f(OPuRadiusLoc, planet_rad + base_h);
+        glUniform4f(OPuColLoc, 0.0f, 0.0f, 1.0f, 0.5f);
+        glUniform3f(OPuLDirLoc, ldir[0], ldir[1], ldir[2]);
         glBindVertexArray(ocean.VAO);
         glDrawElements(GL_TRIANGLES, ocean.i_num, GL_UNSIGNED_INT, 0);
 
@@ -411,7 +452,7 @@ int main()
         glm_scale_uni(model, 0.5f);
         glm_mat4_mul(axis_proj_view, model, mvp);
         glUseProgram(AxisProgram);
-        glUniformMatrix4fv(glGetUniformLocation(AxisProgram, "uMVP"), 1, GL_FALSE, (float *)mvp);
+        glUniformMatrix4fv(APuMVPLoc, 1, GL_FALSE, (float *)mvp);
         glBindVertexArray(axis.VAO);
         glDrawElements(GL_LINES, axis.i_num, GL_UNSIGNED_INT, 0);
 
@@ -506,6 +547,44 @@ void CreateSphere(GLfloat *vertices, GLuint *indices, int stacks, int slices)
         }
     }
 }
+void CreateTrail(GLfloat *vertices, GLuint *indices, float end_angle, int resolution, vec3 color)
+{
+    int vidx = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        vertices[vidx++] = 0.0f;
+    }
+    vertices[vidx++] = color[0];
+    vertices[vidx++] = color[1];
+    vertices[vidx++] = color[2];
+    vertices[vidx++] = 1.0f;
+
+    vertices[vidx++] = 1.0f;
+    vertices[vidx++] = 0.0f;
+    vertices[vidx++] = 0.0f;
+
+    vertices[vidx++] = color[0];
+    vertices[vidx++] = color[1];
+    vertices[vidx++] = color[2];
+    vertices[vidx++] = 1.0f;
+    for (int i = 0; i < resolution; i++)
+    {
+        float angle = end_angle / resolution * i;
+        vertices[vidx++] = cos(-angle);
+        vertices[vidx++] = 0.0f;
+        vertices[vidx++] = -sin(-angle);
+        vertices[vidx++] = color[0];
+        vertices[vidx++] = color[1];
+        vertices[vidx++] = color[2];
+        float t = (float)(resolution - i) / (float)resolution;
+        vertices[vidx++] = sqrtf(t);
+    }
+    int iidx = 0;
+    for (int i = 0; i < resolution + 2; i++)
+    {
+        indices[iidx++] = i;
+    }
+}
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
 {
     GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
@@ -549,4 +628,19 @@ GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentS
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
     return shader_program;
+}
+void KeyboardButtonCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
+{
+    switch (key)
+    {
+    case GLFW_KEY_SPACE:
+        if (action == GLFW_PRESS)
+        {
+            hide_fdir = !hide_fdir;
+            update_fdir_visibility = true;
+        }
+        break;
+    default:
+        break;
+    }
 }

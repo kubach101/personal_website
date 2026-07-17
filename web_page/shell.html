@@ -11,17 +11,34 @@
             padding: 0;
             background: #000;
             overflow: hidden;
+            height: 100%;
+        }
+
+        body {
+            display: flex;
+            justify-content: flex-start;
+            align-items: bottom;
         }
 
         canvas#canvas {
             display: block;
-            margin: 0 auto;
+        }
+
+        #sidebar {
+            background: #2f2f2f;
+            flex: 1;
+            height: 100%;
+            box-sizing: border-box;
+            border-left: 4px solid #6f6f6f;
         }
     </style>
+
 </head>
 
 <body>
-    <canvas id="canvas" width="800" height="800" oncontextmenu="event.preventDefault()"></canvas>
+
+    <canvas id="canvas" width="1200" height="800" oncontextmenu="event.preventDefault()"></canvas>
+    <div id="sidebar"></div>
     <script>
         var Module = {
             canvas: document.getElementById('canvas')
