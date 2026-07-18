@@ -22,6 +22,7 @@
 
         canvas#canvas {
             display: block;
+            align-items: center;
         }
 
         #sidebar {
@@ -38,7 +39,6 @@
 <body>
 
     <canvas id="canvas" width="1200" height="800" oncontextmenu="event.preventDefault()"></canvas>
-    <div id="sidebar"></div>
     <script>
         var Module = {
             canvas: document.getElementById('canvas')
