@@ -68,9 +68,8 @@ const char *CrystalFragmentShader =
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource);
 void CreateCrystalScene();
 GLFWwindow *window = NULL;
-GLenum err;
 GLuint CrystalProgram;
-GLuint VAO, VBO, EBO;
+GLuint VAO, VBO;
 GLuint uMVMLoc, uProjLoc, uNMLoc, uDisLoc, uFrasLoc;
 
 vec3 ldir = {0.0f, 0.0f, -1.0f};
@@ -217,7 +216,7 @@ int main()
     srand(seed);
     scene = malloc(sizeof(GLfloat) * v_num * 6 * c_num);
     CreateCrystalScene();
-    for (int i = 0; i < 12 * 100; i++)
+    /*for (int i = 0; i < 12 * 10; i++)
     {
         printf("%d: "
                "P=(%f %f %f) "
@@ -229,7 +228,7 @@ int main()
                scene[i * 6 + 3],
                scene[i * 6 + 4],
                scene[i * 6 + 5]);
-    }
+    }*/
 
     CrystalProgram = createShaderProgram(CrystalVertexShader, CrystalFragmentShader);
     glGenVertexArrays(1, &VAO);
@@ -265,6 +264,7 @@ int main()
     glfwDestroyWindow(window);
     glfwTerminate();
 #endif
+    free(scene);
     return 0;
 }
 GLuint createShaderProgram(const char *vertexShaderSource, const char *fragmentShaderSource)
@@ -322,8 +322,8 @@ void CreateCrystalScene()
     const float minShellRadius = 20.0f;
     const float maxShellRadius = 45.0f;
 
-    vec3 placedPositions[64];
-    float placedRadii[64];
+    vec3 *placedPositions = malloc(c_num * sizeof(vec3));
+    float *placedRadii = malloc(c_num * sizeof(float));
 
     for (int c = 0; c < c_num; c++)
     {
@@ -393,8 +393,11 @@ void CreateCrystalScene()
                 scene[dstBase + p] = vx[p] * scale + pos[p];
             memcpy(vx, crystal + srcBase + 3, 3 * sizeof(GLfloat));
             glm_vec3_rotate(vx, angle, axis);
+            glm_normalize(vx);
             for (int p = 0; p < 3; p++)
                 scene[dstBase + p + 3] = vx[p];
         }
     }
+    free(placedPositions);
+    free(placedRadii);
 }
