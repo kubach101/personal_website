@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="pl">
-<link
-    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Exo+2:wght@300;400;500&family=Inter:wght@300;400;500&display=swap"
-    rel="stylesheet">
 
 <head>
     <meta charset="utf-8">
     <title>Crystal OS</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Exo+2:wght@300;400;500&family=Inter:wght@300;400;500&display=swap"
+        rel="stylesheet">
     <style>
         html,
         body {
@@ -31,30 +31,111 @@
             background: #111;
         }
 
-        .sidebar {
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 100px;
-
-            padding: 20px;
+        .glass-panel {
             background: #2f2f2f6e;
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border: 1.5px solid #afafaf8e;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
             border-radius: 14px;
+            color: #ffffff;
+        }
 
+        .sidebar {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 100px;
+            padding: 20px;
             color: #ffffff;
             font-family: Orbitron, sans-serif;
             font-size: 20px;
             text-align: center;
-
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 35px;
+            gap: 25px;
+        }
+
+        .app-icon {
+            width: 60px;
+            height: 60px;
+        }
+
+        .app-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            border-width: 3px;
+            border-style: solid;
+            border-color: rgba(0, 0, 0, 0);
+        }
+
+        .app-btn.selected {
+            border-color: #96A5CB;
+        }
+
+        .window {
+            position: absolute;
+            left: 50;
+            top: 50;
+            padding: 8px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+
+        .header {
+            width: 100%;
+            height: 30px;
+            padding: 0px 8px;
+            color: #ffffff;
+            font-family: Orbitron, sans-serif;
+            font-size: 20px;
+            text-align: left;
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #calc-win {
+            display: none;
+            width: 300px;
+            height: 400px;
+        }
+
+        #note-win {
+            display: none;
+            width: 500px;
+            height: 400px;
+        }
+
+        #timer-win {
+            display: none;
+            width: 300px;
+            height: 200px;
+        }
+
+        #settings-win {
+            display: none;
+            width: 400px;
+            height: 600px;
+        }
+
+        .header-btn {
+            width: 24px;
+            height: 24px;
+            background: #5a5a5a;
+            border: 1.5px solid #5a5a5a9e;
+            border-radius: 4px;
+            color: #ffffff;
+            line-height: 24px;
+            text-align: center;
+            padding: 0;
+            cursor: pointer;
         }
 
         .clock {
@@ -64,16 +145,9 @@
             width: 200px;
             height: 80px;
             padding: 20px;
-            background: #2f2f2f6e;
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1.5px solid #afafaf8e;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
-            border-radius: 14px;
             display: flex;
             flex-direction: column;
             justify-content: center;
-
         }
 
         .widget_text {
@@ -82,27 +156,54 @@
             font-size: 30px;
             text-align: center;
         }
-
-
-        .window {
-            position: absolute;
-            background: #1e1e1e;
-            border: 1px solid #666;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
-            border-radius: 6px;
-            overflow: hidden;
-        }
     </style>
 </head>
 
 <body>
-
     <canvas id="canvas" width="1920" height="1080" oncontextmenu="event.preventDefault()"></canvas>
-
-    <div class="sidebar">
-        <div class="widget_text">Apps</div>
+    <div id="top" style="display: none; z-index: 1;">
     </div>
-    <div class="clock">
+    <div class="glass-panel sidebar">
+        <div class="widget_text">Apps</div>
+        <div id="calc-btn" class="app-btn">
+            <img src="icons/calculator.svg" alt="Kalkulator" class="app-icon">
+        </div>
+        <div id="note-btn" class="app-btn">
+            <img src="icons/notepad.svg" alt="Notatnik" class="app-icon">
+        </div>
+        <div id="timer-btn" class="app-btn">
+            <img src="icons/timer.svg" alt="Timer" class="app-icon">
+        </div>
+        <div id="settings-btn" class="app-btn">
+            <img src="icons/settings.svg" alt="Ustawienia" class="app-icon">
+        </div>
+    </div>
+
+    <div id="calc-win" class="glass-panel window">
+        <div id="calc-win-header" class="header">Calculator
+            <div id="calc-close-btn" class="header-btn">✕</div>
+        </div>
+    </div>
+
+    <div id="note-win" class="glass-panel window">
+        <div id="note-win-header" class="header">Notepad
+            <div id="note-close-btn" class="header-btn">✕</div>
+        </div>
+    </div>
+
+    <div id="timer-win" class="glass-panel window">
+        <div id="timer-win-header" class="header">Timer
+            <div id="timer-close-btn" class="header-btn">✕</div>
+        </div>
+    </div>
+
+    <div id="settings-win" class="glass-panel window">
+        <div id="settings-win-header" class="header">Settings
+            <div id="settings-close-btn" class="header-btn">✕</div>
+        </div>
+    </div>
+
+    <div class="glass-panel clock">
         <div class="widget_text">CLOCK</div>
     </div>
 
@@ -111,6 +212,7 @@
             canvas: document.getElementById('canvas')
         };
     </script>
+    <script src="script.js"></script>
     {{{ SCRIPT }}}
 </body>
 
