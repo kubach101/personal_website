@@ -80,7 +80,6 @@ float dt = 0.0f;
 float scale, angle;
 unsigned int seed;
 vec3 pos, axis, vx;
-
 GLfloat crystal[] = {
     1.0f,
     -1.0f,
@@ -170,7 +169,7 @@ void main_loop(void)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, 1920, 1080);
 
-    angle += dt * 30.0f * M_PI / 180.0f;
+    angle += dt * 15.0f * M_PI / 180.0f;
     glm_mat4_identity(model);
     glm_rotate(model, angle, (vec3){0.0f, 1.0f, 0.0f});
     glm_mat4_mul(view, model, mvm);

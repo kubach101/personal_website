@@ -19,6 +19,7 @@ function dragElement(element) {
         initialY = e.clientY;
         document.onmouseup = stopDragging;
         document.onmousemove = dragElement;
+        document.classList.add("dragged");
     }
 
     function dragElement(e) {
@@ -35,6 +36,7 @@ function dragElement(element) {
     function stopDragging() {
         document.onmouseup = null;
         document.onmousemove = null;
+        document.classList.remove("dragged");
     }
 }
 function closeWindow(element) {
@@ -90,3 +92,34 @@ windowInit("calc")
 windowInit("note")
 windowInit("timer")
 windowInit("settings")
+
+var display = document.getElementById("calc-input");
+
+document.addEventListener("keydown", (e) => {
+    var key = e.key;
+
+    // cyfry i podstawowe operatory
+    if ("0123456789.+-*/()".includes(key)) {
+        input.value += key;
+    }
+    // Enter = oblicz wynik
+    else if (key === "Enter") {
+        calculate();
+    }
+    // Backspace = usuń ostatni znak
+    else if (key === "Backspace") {
+        input.value = input.value.slice(0, -1);
+    }
+    // Escape = wyczyść
+    else if (key === "Escape") {
+        input.value = "";
+    }
+});
+
+function calculate() {
+    try {
+        input.value = Function('"use strict"; return (' + input.value + ')')();
+    } catch {
+        input.value = "Błąd";
+    }
+}
